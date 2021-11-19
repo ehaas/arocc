@@ -3968,7 +3968,7 @@ const Result = struct {
 
     fn shouldEval(a: *Result, b: *Result, p: *Parser) Error!bool {
         if (p.no_eval) return false;
-        if (a.val != .unavailable and b.val != .unavailable)
+        if (a.val != .unavailable and b.val != .unavailable and !a.ty.isPtr() and !b.ty.isPtr())
             return true;
 
         try a.saveValue(p);
