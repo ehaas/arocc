@@ -31,10 +31,8 @@ const Range = packed struct {
     len: u32,
 };
 
-/// Represents a slice of T's using 2 words in `extra`:
-///     first is start index of encoded slice in `extra`
-///     second is number of T's in the slice
-/// After that there will be `len` T's encoded into `extra`
+/// Represents a slice of T's using N + 1 words in `extra`
+/// First entry is the length; followed by N * sizeInWords(T) elements
 fn RangeOf(comptime T: type) type {
     return union {
         const Value = T;
@@ -49,7 +47,7 @@ fn RangeOf(comptime T: type) type {
     };
 }
 
-fn isRange(comptime T: type) bool {
+fn isRangeOf(comptime T: type) bool {
     return @typeInfo(T) == .Union and @hasDecl(T, "Value");
 }
 
@@ -470,7 +468,7 @@ pub fn get(ia: *InternArena, gpa: Allocator, key: Key) Allocator.Error!Index {
 
 /// number of u32's required to store T
 fn sizeInWords(comptime T: type) u32 {
-    assert(!isRange(T));
+    assert(T != Range and !isRangeOf(T));
     switch (T) {
         u32, i32, Index, NodeIndex => return 1,
         u64 => @compileError("u64 is variable length and requires value for encoding"),
@@ -498,11 +496,11 @@ fn capacityRequired(extra: anytype) u32 {
     const fields = std.meta.fields(@TypeOf(extra));
     var capacity: u32 = 0;
     inline for (fields) |field| {
-        if (comptime isRange(field.field_type)) {
+        if (comptime isRangeOf(field.field_type)) {
             // TODO: sizeInWordsForValue for each slice element
             const sliceLen = @intCast(u32, @field(extra, field.name).slice.len);
             const fieldSize = sizeInWords(field.field_type.Value);
-            capacity += fieldSize * sliceLen + sizeInWords(Range);
+            capacity += 1 + fieldSize * sliceLen; // length followed by contents
         } else {
             capacity += sizeInWordsForValue(field.field_type, @field(extra, field.name));
         }
@@ -517,8 +515,6 @@ fn addExtra(ia: *InternArena, gpa: Allocator, extra: anytype) Allocator.Error!u3
 }
 
 fn addRangeAssumeCapacity(ia: *InternArena, range: anytype) void {
-    const start = @intCast(u32, ia.extra.items.len) + sizeInWords(Range);
-    ia.extra.appendAssumeCapacity(start);
     ia.extra.appendAssumeCapacity(@intCast(u32, range.slice.len));
     for (range.slice) |item| {
         _ = ia.addExtraAssumeCapacity(item);
@@ -563,7 +559,7 @@ fn addExtraAssumeCapacity(ia: *InternArena, extra: anytype) u32 {
     const fields = std.meta.fields(@TypeOf(extra));
     const result = @intCast(u32, ia.extra.items.len);
     inline for (fields) |field| {
-        if (comptime isRange(field.field_type)) {
+        if (comptime isRangeOf(field.field_type)) {
             ia.addRangeAssumeCapacity(@field(extra, field.name));
         } else if (field.field_type == u64) {
             var scratch: [3]u32 = undefined;
@@ -582,14 +578,14 @@ fn addExtraAssumeCapacity(ia: *InternArena, extra: anytype) u32 {
     return result;
 }
 
-fn extraData(ia: InternArena, comptime T: type, index: usize) T {
+fn extraData(ia: InternArena, comptime T: type, index: u32) T {
     const fields = std.meta.fields(T);
-    var i: usize = index;
+    var i: u32 = index;
     var result: T = undefined;
     inline for (fields) |field| {
-        if (comptime isRange(field.field_type)) {
-            @field(result, field.name) = .{ .range = .{ .start = ia.extra.items[i], .len = ia.extra.items[i + 1] } };
-            i += @field(result, field.name).range.len + sizeInWords(Range);
+        if (comptime isRangeOf(field.field_type)) {
+            @field(result, field.name) = .{ .range = .{ .start = i + 1, .len = ia.extra.items[i] } };
+            i += @field(result, field.name).range.len + 1;
         } else if (field.field_type == u64) {
             const size = encodedLength(ia.extra.items[i]);
             @field(result, field.name) = decodeLong(ia.extra.items[i .. i + size]);
@@ -648,6 +644,7 @@ test "basic usage" {
             .params = .{ .slice = &params },
         },
     });
+    try std.testing.expectEqual(@as(u32, 2), ia.indexToKey(my_func_type).func.params.range.len);
 
     const func_one_param = try ia.get(gpa, .{
         .func = .{
