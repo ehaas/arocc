@@ -408,6 +408,7 @@ test {
     _ = @import("Pragma.zig");
     _ = @import("Preprocessor.zig");
     _ = @import("Source.zig");
+    _ = @import("StringInterner.zig");
     _ = @import("Tokenizer.zig");
     _ = @import("Tree.zig");
     _ = @import("Type.zig");
