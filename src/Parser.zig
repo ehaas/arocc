@@ -838,6 +838,7 @@ fn decl(p: *Parser) Error!bool {
                     // find and correct parameter types
                     // TODO check for missing declarations and redefinitions
                     const name_str = p.tokSlice(d.name);
+                    const interned_name = try p.comp.intern(name_str);
                     for (init_d.d.ty.params()) |*param| {
                         if (mem.eql(u8, param.name, name_str)) {
                             param.ty = d.ty;
@@ -851,7 +852,7 @@ fn decl(p: *Parser) Error!bool {
                     // bypass redefinition check to avoid duplicate errors
                     try p.syms.syms.append(p.gpa, .{
                         .kind = .def,
-                        .name = name_str,
+                        .name = interned_name,
                         .tok = d.name,
                         .ty = d.ty,
                         .val = .{},
@@ -873,7 +874,7 @@ fn decl(p: *Parser) Error!bool {
                 // bypass redefinition check to avoid duplicate errors
                 try p.syms.syms.append(p.gpa, .{
                     .kind = .def,
-                    .name = param.name,
+                    .name = try p.comp.intern(param.name),
                     .tok = param.name_tok,
                     .ty = param.ty,
                     .val = .{},
@@ -1644,7 +1645,7 @@ fn recordSpec(p: *Parser) Error!Type {
             }, attr_buf_top, null);
             try p.syms.syms.append(p.gpa, .{
                 .kind = if (is_struct) .@"struct" else .@"union",
-                .name = p.tokSlice(ident),
+                .name = record_ty.name,
                 .tok = ident,
                 .ty = ty,
                 .val = .{},
@@ -1691,7 +1692,7 @@ fn recordSpec(p: *Parser) Error!Type {
         symbol_index = p.syms.syms.len;
         try p.syms.syms.append(p.gpa, .{
             .kind = if (is_struct) .@"struct" else .@"union",
-            .name = p.tokSlice(maybe_ident.?),
+            .name = try p.comp.intern(p.tokSlice(maybe_ident.?)),
             .tok = maybe_ident.?,
             .ty = ty,
             .val = .{},
@@ -1986,7 +1987,7 @@ fn enumSpec(p: *Parser) Error!Type {
             }, attr_buf_top, null);
             try p.syms.syms.append(p.gpa, .{
                 .kind = .@"enum",
-                .name = p.tokSlice(ident), // TODO: use string interner for symbol stack
+                .name = enum_ty.name,
                 .tok = ident,
                 .ty = ty,
                 .val = .{},
@@ -2096,7 +2097,7 @@ fn enumSpec(p: *Parser) Error!Type {
     if (maybe_ident != null and !defined) {
         try p.syms.syms.append(p.gpa, .{
             .kind = .@"enum",
-            .name = p.tokSlice(maybe_ident.?),
+            .name = try p.comp.intern(p.tokSlice(maybe_ident.?)),
             .ty = ty,
             .tok = maybe_ident.?,
             .val = .{},
@@ -6218,7 +6219,8 @@ fn primaryExpr(p: *Parser) Error!Result {
                     }),
                 };
             }
-            if (p.syms.findSymbol(p, name_tok)) |sym| {
+            const interned_name = try p.comp.intern(name);
+            if (p.syms.findSymbol(interned_name)) |sym| {
                 try p.checkDeprecatedUnavailable(sym.ty, name_tok, sym.tok);
                 if (sym.val.tag == .int) {
                     switch (p.const_decl_folding) {

@@ -9,11 +9,12 @@ const NodeIndex = Tree.NodeIndex;
 const Type = @import("Type.zig");
 const Parser = @import("Parser.zig");
 const Value = @import("Value.zig");
+const StringInterner = @import("StringInterner.zig");
 
 const SymbolStack = @This();
 
 pub const Symbol = struct {
-    name: []const u8,
+    name: StringInterner.Id,
     ty: Type,
     tok: TokenIndex,
     node: NodeIndex = .none,
@@ -55,44 +56,44 @@ pub fn popScope(s: *SymbolStack) void {
 
 pub fn findTypedef(s: *SymbolStack, p: *Parser, name_tok: TokenIndex, no_type_yet: bool) !?Symbol {
     const name = p.tokSlice(name_tok);
+    const interned_name = try p.comp.intern(name);
     const kinds = s.syms.items(.kind);
     const names = s.syms.items(.name);
     var i = s.syms.len;
     while (i > 0) {
         i -= 1;
         switch (kinds[i]) {
-            .typedef => if (mem.eql(u8, names[i], name)) return s.syms.get(i),
-            .@"struct" => if (mem.eql(u8, names[i], name)) {
+            .typedef => if (names[i] == interned_name) return s.syms.get(i),
+            .@"struct" => if (names[i] == interned_name) {
                 if (no_type_yet) return null;
                 try p.errStr(.must_use_struct, name_tok, name);
                 return s.syms.get(i);
             },
-            .@"union" => if (mem.eql(u8, names[i], name)) {
+            .@"union" => if (names[i] == interned_name) {
                 if (no_type_yet) return null;
                 try p.errStr(.must_use_union, name_tok, name);
                 return s.syms.get(i);
             },
-            .@"enum" => if (mem.eql(u8, names[i], name)) {
+            .@"enum" => if (names[i] == interned_name) {
                 if (no_type_yet) return null;
                 try p.errStr(.must_use_enum, name_tok, name);
                 return s.syms.get(i);
             },
-            .def, .decl => if (mem.eql(u8, names[i], name)) return null,
+            .def, .decl => if (names[i] == interned_name) return null,
             else => {},
         }
     }
     return null;
 }
 
-pub fn findSymbol(s: *SymbolStack, p: *Parser, name_tok: TokenIndex) ?Symbol {
-    const name = p.tokSlice(name_tok);
+pub fn findSymbol(s: *SymbolStack, name: StringInterner.Id) ?Symbol {
     const kinds = s.syms.items(.kind);
     const names = s.syms.items(.name);
     var i = s.syms.len;
     while (i > 0) {
         i -= 1;
         switch (kinds[i]) {
-            .def, .decl, .enumeration => if (mem.eql(u8, names[i], name)) return s.syms.get(i),
+            .def, .decl, .enumeration => if (names[i] == name) return s.syms.get(i),
             else => {},
         }
     }
@@ -107,6 +108,7 @@ pub fn findTag(
     next_tok_id: Token.Id,
 ) !?Symbol {
     const name = p.tokSlice(name_tok);
+    const interned_name = try p.comp.intern(name);
     const kinds = s.syms.items(.kind);
     const names = s.syms.items(.name);
     // `tag Name;` should always result in a new type if in a new scope.
@@ -115,15 +117,15 @@ pub fn findTag(
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .@"enum" => if (mem.eql(u8, names[i], name)) {
+            .@"enum" => if (names[i] == interned_name) {
                 if (kind == .keyword_enum) return s.syms.get(i);
                 break;
             },
-            .@"struct" => if (mem.eql(u8, names[i], name)) {
+            .@"struct" => if (names[i] == interned_name) {
                 if (kind == .keyword_struct) return s.syms.get(i);
                 break;
             },
-            .@"union" => if (mem.eql(u8, names[i], name)) {
+            .@"union" => if (names[i] == interned_name) {
                 if (kind == .keyword_union) return s.syms.get(i);
                 break;
             },
@@ -147,12 +149,13 @@ pub fn defineTypedef(
 ) !void {
     const kinds = s.syms.items(.kind);
     const names = s.syms.items(.name);
+    const interned_name = try p.comp.intern(name);
     const end = s.scopeEnd();
     var i = s.syms.len;
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .typedef => if (mem.eql(u8, names[i], name)) {
+            .typedef => if (names[i] == interned_name) {
                 const prev_ty = s.syms.items(.ty)[i];
                 if (ty.eql(prev_ty, p.pp.comp, true)) break;
                 try p.errStr(.redefinition_of_typedef, tok, try p.typePairStrExtra(ty, " vs ", prev_ty));
@@ -165,7 +168,7 @@ pub fn defineTypedef(
     }
     try s.syms.append(p.pp.comp.gpa, .{
         .kind = .typedef,
-        .name = name,
+        .name = interned_name,
         .tok = tok,
         .ty = ty,
         .node = node,
@@ -182,6 +185,7 @@ pub fn defineSymbol(
     val: Value,
 ) !void {
     const name = p.tokSlice(tok);
+    const interned_name = try p.comp.intern(name);
     const kinds = s.syms.items(.kind);
     const names = s.syms.items(.name);
     const end = s.scopeEnd();
@@ -189,12 +193,12 @@ pub fn defineSymbol(
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .enumeration => if (mem.eql(u8, names[i], name)) {
+            .enumeration => if (names[i] == interned_name) {
                 try p.errStr(.redefinition_different_sym, tok, name);
                 try p.errTok(.previous_definition, s.syms.items(.tok)[i]);
                 break;
             },
-            .decl => if (mem.eql(u8, names[i], name)) {
+            .decl => if (names[i] == interned_name) {
                 const prev_ty = s.syms.items(.ty)[i];
                 if (!ty.eql(prev_ty, p.pp.comp, true)) { // TODO adjusted equality check
                     try p.errStr(.redefinition_incompatible, tok, name);
@@ -202,7 +206,7 @@ pub fn defineSymbol(
                 }
                 break;
             },
-            .def => if (mem.eql(u8, names[i], name)) {
+            .def => if (names[i] == interned_name) {
                 try p.errStr(.redefinition, tok, name);
                 try p.errTok(.previous_definition, s.syms.items(.tok)[i]);
                 break;
@@ -212,7 +216,7 @@ pub fn defineSymbol(
     }
     try s.syms.append(p.pp.comp.gpa, .{
         .kind = .def,
-        .name = name,
+        .name = interned_name,
         .tok = tok,
         .ty = ty,
         .node = node,
@@ -228,6 +232,7 @@ pub fn declareSymbol(
     node: NodeIndex,
 ) !void {
     const name = p.tokSlice(tok);
+    const interned_name = try p.comp.intern(name);
     const kinds = s.syms.items(.kind);
     const names = s.syms.items(.name);
     const end = s.scopeEnd();
@@ -235,12 +240,12 @@ pub fn declareSymbol(
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .enumeration => if (mem.eql(u8, names[i], name)) {
+            .enumeration => if (names[i] == interned_name) {
                 try p.errStr(.redefinition_different_sym, tok, name);
                 try p.errTok(.previous_definition, s.syms.items(.tok)[i]);
                 break;
             },
-            .decl => if (mem.eql(u8, names[i], name)) {
+            .decl => if (names[i] == interned_name) {
                 const prev_ty = s.syms.items(.ty)[i];
                 if (!ty.eql(prev_ty, p.pp.comp, true)) { // TODO adjusted equality check
                     try p.errStr(.redefinition_incompatible, tok, name);
@@ -248,7 +253,7 @@ pub fn declareSymbol(
                 }
                 break;
             },
-            .def => if (mem.eql(u8, names[i], name)) {
+            .def => if (names[i] == interned_name) {
                 const prev_ty = s.syms.items(.ty)[i];
                 if (!ty.eql(prev_ty, p.pp.comp, true)) { // TODO adjusted equality check
                     try p.errStr(.redefinition_incompatible, tok, name);
@@ -262,7 +267,7 @@ pub fn declareSymbol(
     }
     try s.syms.append(p.pp.comp.gpa, .{
         .kind = .decl,
-        .name = name,
+        .name = interned_name,
         .tok = tok,
         .ty = ty,
         .node = node,
@@ -272,6 +277,7 @@ pub fn declareSymbol(
 
 pub fn defineParam(s: *SymbolStack, p: *Parser, ty: Type, tok: TokenIndex) !void {
     const name = p.tokSlice(tok);
+    const interned_name = try p.comp.intern(name);
     const kinds = s.syms.items(.kind);
     const names = s.syms.items(.name);
     const end = s.scopeEnd();
@@ -279,7 +285,7 @@ pub fn defineParam(s: *SymbolStack, p: *Parser, ty: Type, tok: TokenIndex) !void
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .enumeration, .decl, .def => if (mem.eql(u8, names[i], name)) {
+            .enumeration, .decl, .def => if (names[i] == interned_name) {
                 try p.errStr(.redefinition_of_parameter, tok, name);
                 try p.errTok(.previous_definition, s.syms.items(.tok)[i]);
                 break;
@@ -289,7 +295,7 @@ pub fn defineParam(s: *SymbolStack, p: *Parser, ty: Type, tok: TokenIndex) !void
     }
     try s.syms.append(p.pp.comp.gpa, .{
         .kind = .def,
-        .name = name,
+        .name = interned_name,
         .tok = tok,
         .ty = ty,
         .val = .{},
@@ -303,6 +309,7 @@ pub fn defineTag(
     tok: TokenIndex,
 ) !?Symbol {
     const name = p.tokSlice(tok);
+    const interned_name = try p.comp.intern(name);
     const kinds = s.syms.items(.kind);
     const names = s.syms.items(.name);
     const end = s.scopeEnd();
@@ -310,19 +317,19 @@ pub fn defineTag(
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .@"enum" => if (mem.eql(u8, names[i], name)) {
+            .@"enum" => if (names[i] == interned_name) {
                 if (kind == .keyword_enum) return s.syms.get(i);
                 try p.errStr(.wrong_tag, tok, name);
                 try p.errTok(.previous_definition, s.syms.items(.tok)[i]);
                 return null;
             },
-            .@"struct" => if (mem.eql(u8, names[i], name)) {
+            .@"struct" => if (names[i] == interned_name) {
                 if (kind == .keyword_struct) return s.syms.get(i);
                 try p.errStr(.wrong_tag, tok, name);
                 try p.errTok(.previous_definition, s.syms.items(.tok)[i]);
                 return null;
             },
-            .@"union" => if (mem.eql(u8, names[i], name)) {
+            .@"union" => if (names[i] == interned_name) {
                 if (kind == .keyword_union) return s.syms.get(i);
                 try p.errStr(.wrong_tag, tok, name);
                 try p.errTok(.previous_definition, s.syms.items(.tok)[i]);
@@ -342,6 +349,7 @@ pub fn defineEnumeration(
     val: Value,
 ) !void {
     const name = p.tokSlice(tok);
+    const interned_name = try p.comp.intern(name);
     const kinds = s.syms.items(.kind);
     const names = s.syms.items(.name);
     const end = s.scopeEnd();
@@ -349,12 +357,12 @@ pub fn defineEnumeration(
     while (i > end) {
         i -= 1;
         switch (kinds[i]) {
-            .enumeration => if (mem.eql(u8, names[i], name)) {
+            .enumeration => if (names[i] == interned_name) {
                 try p.errStr(.redefinition, tok, name);
                 try p.errTok(.previous_definition, s.syms.items(.tok)[i]);
                 return;
             },
-            .decl, .def => if (mem.eql(u8, names[i], name)) {
+            .decl, .def => if (names[i] == interned_name) {
                 try p.errStr(.redefinition_different_sym, tok, name);
                 try p.errTok(.previous_definition, s.syms.items(.tok)[i]);
                 return;
@@ -364,7 +372,7 @@ pub fn defineEnumeration(
     }
     try s.syms.append(p.pp.comp.gpa, .{
         .kind = .enumeration,
-        .name = name,
+        .name = interned_name,
         .tok = tok,
         .ty = ty,
         .val = val,
