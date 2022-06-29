@@ -176,7 +176,7 @@ pub const Record = struct {
     field_attributes: ?[*][]const Attribute,
 
     pub const Field = struct {
-        name: []const u8,
+        name: StringInterner.Id,
         ty: Type,
         /// zero for anonymous fields
         name_tok: TokenIndex = 0,
@@ -626,20 +626,20 @@ pub fn hasUnboundVLA(ty: Type) bool {
     }
 }
 
-pub fn hasField(ty: Type, name: []const u8) bool {
+pub fn hasField(ty: Type, name: StringInterner.Id) bool {
     switch (ty.specifier) {
         .@"struct" => {
             std.debug.assert(!ty.data.record.isIncomplete());
             for (ty.data.record.fields) |f| {
                 if (f.isAnonymousRecord() and f.ty.hasField(name)) return true;
-                if (std.mem.eql(u8, name, f.name)) return true;
+                if (name == f.name) return true;
             }
         },
         .@"union" => {
             std.debug.assert(!ty.data.record.isIncomplete());
             for (ty.data.record.fields) |f| {
                 if (f.isAnonymousRecord() and f.ty.hasField(name)) return true;
-                if (std.mem.eql(u8, name, f.name)) return true;
+                if (name == f.name) return true;
             }
         },
         .typeof_type => return ty.data.sub_type.hasField(name),

@@ -1878,7 +1878,7 @@ fn recordDeclarator(p: *Parser) Error!bool {
             if (ty.isAnonymousRecord(&p.comp.string_interner)) {
                 // An anonymous record appears as indirect fields on the parent
                 try p.record_buf.append(.{
-                    .name = try p.getAnonymousName(first_tok),
+                    .name = try p.comp.intern(try p.getAnonymousName(first_tok)),
                     .ty = ty,
                     .bit_width = 0,
                 });
@@ -1893,8 +1893,9 @@ fn recordDeclarator(p: *Parser) Error!bool {
             }
             try p.err(.missing_declaration);
         } else {
+            const name = if (name_tok != 0) p.tokSlice(name_tok) else try p.getAnonymousName(first_tok);
             try p.record_buf.append(.{
-                .name = if (name_tok != 0) p.tokSlice(name_tok) else try p.getAnonymousName(first_tok),
+                .name = try p.comp.intern(name),
                 .ty = ty,
                 .name_tok = name_tok,
                 .bit_width = bits,
@@ -2791,11 +2792,12 @@ fn initializerItem(p: *Parser, il: *InitList, init_ty: Type) Error!bool {
                 designation = true;
             } else if (p.eatToken(.period)) |period| {
                 const field_name = p.tokSlice(try p.expectIdentifier());
+                const interned_name = try p.comp.intern(field_name);
                 cur_ty = cur_ty.canonicalize(.standard);
                 if (!cur_ty.isRecord()) {
                     try p.errStr(.invalid_field_designator, period, try p.typeStr(cur_ty));
                     return error.ParsingFailed;
-                } else if (!cur_ty.hasField(field_name)) {
+                } else if (!cur_ty.hasField(interned_name)) {
                     try p.errStr(.no_such_field_designator, period, field_name);
                     return error.ParsingFailed;
                 }
@@ -2805,13 +2807,13 @@ fn initializerItem(p: *Parser, il: *InitList, init_ty: Type) Error!bool {
                     for (cur_ty.data.record.fields) |f, i| {
                         if (f.isAnonymousRecord()) {
                             // Recurse into anonymous field if it has a field by the name.
-                            if (!f.ty.hasField(field_name)) continue;
+                            if (!f.ty.hasField(interned_name)) continue;
                             cur_ty = f.ty.canonicalize(.standard);
                             cur_il = try il.find(p.gpa, i);
                             cur_index_hint = cur_index_hint orelse i;
                             continue :outer;
                         }
-                        if (std.mem.eql(u8, field_name, f.name)) {
+                        if (interned_name == f.name) {
                             cur_il = try cur_il.find(p.gpa, i);
                             cur_ty = f.ty;
                             cur_index_hint = cur_index_hint orelse i;
@@ -5998,7 +6000,7 @@ fn fieldAccess(
 }
 
 fn validateFieldAccess(p: *Parser, record_ty: Type, expr_ty: Type, field_name_tok: TokenIndex, field_name: []const u8) Error!void {
-    if (record_ty.hasField(field_name)) return;
+    if (record_ty.hasField(try p.comp.intern(field_name))) return;
 
     p.strings.items.len = 0;
 
@@ -6012,9 +6014,10 @@ fn validateFieldAccess(p: *Parser, record_ty: Type, expr_ty: Type, field_name_to
 }
 
 fn fieldAccessExtra(p: *Parser, lhs: NodeIndex, record_ty: Type, field_name: []const u8, is_arrow: bool) Error!Result {
+    const interned_name = try p.comp.intern(field_name);
     for (record_ty.data.record.fields) |f, i| {
         if (f.isAnonymousRecord()) {
-            if (!f.ty.hasField(field_name)) continue;
+            if (!f.ty.hasField(interned_name)) continue;
             const inner = try p.addNode(.{
                 .tag = if (is_arrow) .member_access_ptr_expr else .member_access_expr,
                 .ty = f.ty,
@@ -6022,7 +6025,7 @@ fn fieldAccessExtra(p: *Parser, lhs: NodeIndex, record_ty: Type, field_name: []c
             });
             return p.fieldAccessExtra(inner, f.ty, field_name, false);
         }
-        if (std.mem.eql(u8, field_name, f.name)) return Result{
+        if (interned_name == f.name) return Result{
             .ty = f.ty,
             .node = try p.addNode(.{
                 .tag = if (is_arrow) .member_access_ptr_expr else .member_access_expr,

@@ -1136,7 +1136,8 @@ fn dumpNode(tree: Tree, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Erro
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("name: ");
             if (tree.comp.diag.color) util.setColor(NAME, w);
-            try w.print("{s}\n", .{lhs_ty.data.record.fields[data.member.index].name});
+            const field_name = tree.comp.string_interner.getString(lhs_ty.data.record.fields[data.member.index].name);
+            try w.print("{s}\n", .{field_name});
             if (tree.comp.diag.color) util.setColor(.reset, w);
         },
         .array_access_expr => {
