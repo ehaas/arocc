@@ -7,6 +7,7 @@ const Tree = aro.Tree;
 const Token = Tree.Token;
 const NodeIndex = Tree.NodeIndex;
 const AllocatorError = std.mem.Allocator.Error;
+const StringInterner = aro.StringInterner;
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -126,6 +127,9 @@ pub fn main() !void {
     var initial_comp = aro.Compilation.init(gpa);
     defer initial_comp.deinit();
 
+    var string_interner = initial_comp.string_interner;
+    defer initial_comp.string_interner = string_interner;
+
     const cases_include_dir = try std.fs.path.join(gpa, &.{ args[1], "include" });
     defer gpa.free(cases_include_dir);
 
@@ -152,11 +156,14 @@ pub fn main() !void {
     var skip_count: u32 = 0;
     next_test: for (cases.items) |path| {
         var comp = initial_comp;
+        comp.string_interner = string_interner;
         defer {
             // preserve some values
             comp.include_dirs = @TypeOf(comp.include_dirs).init(gpa);
             comp.system_include_dirs = @TypeOf(comp.system_include_dirs).init(gpa);
             comp.pragma_handlers = @TypeOf(comp.pragma_handlers).init(gpa);
+            string_interner = comp.string_interner;
+            comp.string_interner = @TypeOf(comp.string_interner){};
             // reset everything else
             comp.deinit();
         }
@@ -534,7 +541,7 @@ const StmtTypeDumper = struct {
         const tag = tree.nodes.items(.tag)[@enumToInt(node)];
         if (tag == .implicit_return) return;
         const ty = tree.nodes.items(.ty)[@enumToInt(node)];
-        ty.dump(m.buf.writer()) catch {};
+        ty.dump(&tree.comp.string_interner, m.buf.writer()) catch {};
         const owned = m.buf.toOwnedSlice();
         errdefer m.buf.allocator.free(owned);
         try self.types.append(owned);

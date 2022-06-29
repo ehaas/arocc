@@ -11,6 +11,7 @@ const Tokenizer = @import("Tokenizer.zig");
 const Token = Tokenizer.Token;
 const Type = @import("Type.zig");
 const Pragma = @import("Pragma.zig");
+const StringInterner = @import("StringInterner.zig");
 
 const Compilation = @This();
 
@@ -33,6 +34,7 @@ verbose_ast: bool = false,
 langopts: LangOpts = .{},
 generated_buf: std.ArrayList(u8),
 builtins: Builtins = .{},
+string_interner: StringInterner = .{},
 types: struct {
     wchar: Type,
     ptrdiff: Type,
@@ -72,6 +74,11 @@ pub fn deinit(comp: *Compilation) void {
     comp.generated_buf.deinit();
     comp.builtins.deinit(comp.gpa);
     comp.invalid_utf8_locs.deinit(comp.gpa);
+    comp.string_interner.deinit(comp.gpa);
+}
+
+pub fn intern(comp: *Compilation, str: []const u8) !StringInterner.Id {
+    return comp.string_interner.intern(comp.gpa, str);
 }
 
 fn generateDateAndTime(w: anytype) !void {
@@ -337,16 +344,16 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
     // try comp.generateSizeofType(w, "__SIZEOF_WINT_T__", .{ .specifier = .pointer });
 
     // various int types
-    try generateTypeMacro(w, "__PTRDIFF_TYPE__", comp.types.ptrdiff);
-    try generateTypeMacro(w, "__SIZE_TYPE__", comp.types.size);
-    try generateTypeMacro(w, "__WCHAR_TYPE__", comp.types.wchar);
+    try generateTypeMacro(comp, w, "__PTRDIFF_TYPE__", comp.types.ptrdiff);
+    try generateTypeMacro(comp, w, "__SIZE_TYPE__", comp.types.size);
+    try generateTypeMacro(comp, w, "__WCHAR_TYPE__", comp.types.wchar);
 
     return comp.addSourceFromBuffer("<builtin>", buf.items);
 }
 
-fn generateTypeMacro(w: anytype, name: []const u8, ty: Type) !void {
+fn generateTypeMacro(comp: *const Compilation, w: anytype, name: []const u8, ty: Type) !void {
     try w.print("#define {s} ", .{name});
-    try ty.print(w);
+    try ty.print(&comp.string_interner, w);
     try w.writeByte('\n');
 }
 

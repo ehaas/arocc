@@ -5,6 +5,7 @@ const NodeIndex = Tree.NodeIndex;
 const Parser = @import("Parser.zig");
 const Compilation = @import("Compilation.zig");
 const Attribute = @import("Attribute.zig");
+const StringInterner = @import("StringInterner.zig");
 
 const Type = @This();
 
@@ -135,7 +136,7 @@ pub const Attributed = struct {
 
 // TODO improve memory usage
 pub const Enum = struct {
-    name: []const u8,
+    name: StringInterner.Id,
     tag_ty: Type,
     fields: []Field,
     fixed: bool,
@@ -151,8 +152,9 @@ pub const Enum = struct {
         return e.fields.len == std.math.maxInt(usize);
     }
 
-    pub fn create(allocator: std.mem.Allocator, name: []const u8, fixed_ty: ?Type) !*Enum {
+    pub fn create(allocator: std.mem.Allocator, name: StringInterner.Id, fixed_ty: ?Type) !*Enum {
         var e = try allocator.create(Enum);
+
         e.name = name;
         e.fields.len = std.math.maxInt(usize);
         if (fixed_ty) |some| e.tag_ty = some;
@@ -1898,25 +1900,25 @@ pub fn hasAttribute(ty: Type, tag: Attribute.Tag) bool {
 }
 
 /// Print type in C style
-pub fn print(ty: Type, w: anytype) @TypeOf(w).Error!void {
-    _ = try ty.printPrologue(w);
-    try ty.printEpilogue(w);
+pub fn print(ty: Type, si: *const StringInterner, w: anytype) @TypeOf(w).Error!void {
+    _ = try ty.printPrologue(si, w);
+    try ty.printEpilogue(si, w);
 }
 
-pub fn printNamed(ty: Type, name: []const u8, w: anytype) @TypeOf(w).Error!void {
-    const simple = try ty.printPrologue(w);
+pub fn printNamed(ty: Type, name: []const u8, si: *const StringInterner, w: anytype) @TypeOf(w).Error!void {
+    const simple = try ty.printPrologue(si, w);
     if (simple) try w.writeByte(' ');
     try w.writeAll(name);
-    try ty.printEpilogue(w);
+    try ty.printEpilogue(si, w);
 }
 
 /// return true if `ty` is simple
-fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
+fn printPrologue(ty: Type, si: *const StringInterner, w: anytype) @TypeOf(w).Error!bool {
     if (ty.qual.atomic) {
         var non_atomic_ty = ty;
         non_atomic_ty.qual.atomic = false;
         try w.writeAll("_Atomic(");
-        try non_atomic_ty.print(w);
+        try non_atomic_ty.print(si, w);
         try w.writeAll(")");
         return true;
     }
@@ -1931,7 +1933,7 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
         .decayed_typeof_expr,
         => {
             const elem_ty = ty.elemType();
-            const simple = try elem_ty.printPrologue(w);
+            const simple = try elem_ty.printPrologue(si, w);
             if (simple) try w.writeByte(' ');
             if (elem_ty.isFunc() or elem_ty.isArray()) try w.writeByte('(');
             try w.writeByte('*');
@@ -1940,23 +1942,23 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
         },
         .func, .var_args_func, .old_style_func => {
             const ret_ty = ty.data.func.return_type;
-            const simple = try ret_ty.printPrologue(w);
+            const simple = try ret_ty.printPrologue(si, w);
             if (simple) try w.writeByte(' ');
             return false;
         },
         .array, .static_array, .incomplete_array, .unspecified_variable_len_array, .variable_len_array => {
             const elem_ty = ty.elemType();
-            const simple = try elem_ty.printPrologue(w);
+            const simple = try elem_ty.printPrologue(si, w);
             if (simple) try w.writeByte(' ');
             return false;
         },
         .typeof_type, .typeof_expr => {
             const actual = ty.canonicalize(.standard);
-            return actual.printPrologue(w);
+            return actual.printPrologue(si, w);
         },
         .attributed => {
             const actual = ty.canonicalize(.standard);
-            return actual.printPrologue(w);
+            return actual.printPrologue(si, w);
         },
         else => {},
     }
@@ -1964,10 +1966,10 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
 
     switch (ty.specifier) {
         .@"enum" => if (ty.data.@"enum".fixed) {
-            try w.print("enum {s}: ", .{ty.data.@"enum".name});
-            try ty.data.@"enum".tag_ty.dump(w);
+            try w.print("enum {s}: ", .{si.getString(ty.data.@"enum".name)});
+            try ty.data.@"enum".tag_ty.dump(si, w);
         } else {
-            try w.print("enum {s}", .{ty.data.@"enum".name});
+            try w.print("enum {s}", .{si.getString(ty.data.@"enum".name)});
         },
         .@"struct" => try w.print("struct {s}", .{ty.data.record.name}),
         .@"union" => try w.print("union {s}", .{ty.data.record.name}),
@@ -1975,11 +1977,11 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
             const len = ty.data.array.len;
             const elem_ty = ty.data.array.elem;
             try w.print("__attribute__((__vector_size__({d} * sizeof(", .{len});
-            _ = try elem_ty.printPrologue(w);
+            _ = try elem_ty.printPrologue(si, w);
             try w.writeAll(")))) ");
-            _ = try elem_ty.printPrologue(w);
+            _ = try elem_ty.printPrologue(si, w);
             try w.print(" (vector of {d} '", .{len});
-            _ = try elem_ty.printPrologue(w);
+            _ = try elem_ty.printPrologue(si, w);
             try w.writeAll("' values)");
         },
         else => try w.writeAll(Builder.fromType(ty).str().?),
@@ -1987,7 +1989,7 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
     return true;
 }
 
-fn printEpilogue(ty: Type, w: anytype) @TypeOf(w).Error!void {
+fn printEpilogue(ty: Type, si: *const StringInterner, w: anytype) @TypeOf(w).Error!void {
     if (ty.qual.atomic) return;
     switch (ty.specifier) {
         .pointer,
@@ -2001,14 +2003,14 @@ fn printEpilogue(ty: Type, w: anytype) @TypeOf(w).Error!void {
         => {
             const elem_ty = ty.elemType();
             if (elem_ty.isFunc() or elem_ty.isArray()) try w.writeByte(')');
-            try elem_ty.printEpilogue(w);
+            try elem_ty.printEpilogue(si, w);
         },
         .func, .var_args_func, .old_style_func => {
             try w.writeByte('(');
             for (ty.data.func.params) |param, i| {
                 if (i != 0) try w.writeAll(", ");
-                _ = try param.ty.printPrologue(w);
-                try param.ty.printEpilogue(w);
+                _ = try param.ty.printPrologue(si, w);
+                try param.ty.printEpilogue(si, w);
             }
             if (ty.specifier != .func) {
                 if (ty.data.func.params.len != 0) try w.writeAll(", ");
@@ -2017,40 +2019,40 @@ fn printEpilogue(ty: Type, w: anytype) @TypeOf(w).Error!void {
                 try w.writeAll("void");
             }
             try w.writeByte(')');
-            try ty.data.func.return_type.printEpilogue(w);
+            try ty.data.func.return_type.printEpilogue(si, w);
         },
         .array, .static_array => {
             try w.writeByte('[');
             if (ty.specifier == .static_array) try w.writeAll("static ");
             try ty.qual.dump(w);
             try w.print("{d}]", .{ty.data.array.len});
-            try ty.data.array.elem.printEpilogue(w);
+            try ty.data.array.elem.printEpilogue(si, w);
         },
         .incomplete_array => {
             try w.writeByte('[');
             try ty.qual.dump(w);
             try w.writeByte(']');
-            try ty.data.array.elem.printEpilogue(w);
+            try ty.data.array.elem.printEpilogue(si, w);
         },
         .unspecified_variable_len_array => {
             try w.writeByte('[');
             try ty.qual.dump(w);
             try w.writeAll("*]");
-            try ty.data.sub_type.printEpilogue(w);
+            try ty.data.sub_type.printEpilogue(si, w);
         },
         .variable_len_array => {
             try w.writeByte('[');
             try ty.qual.dump(w);
             try w.writeAll("<expr>]");
-            try ty.data.expr.ty.printEpilogue(w);
+            try ty.data.expr.ty.printEpilogue(si, w);
         },
         .typeof_type, .typeof_expr => {
             const actual = ty.canonicalize(.standard);
-            try actual.printEpilogue(w);
+            try actual.printEpilogue(si, w);
         },
         .attributed => {
             const actual = ty.canonicalize(.standard);
-            try actual.printEpilogue(w);
+            try actual.printEpilogue(si, w);
         },
         else => {},
     }
@@ -2060,85 +2062,85 @@ fn printEpilogue(ty: Type, w: anytype) @TypeOf(w).Error!void {
 const dump_detailed_containers = false;
 
 // Print as Zig types since those are actually readable
-pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
+pub fn dump(ty: Type, si: *const StringInterner, w: anytype) @TypeOf(w).Error!void {
     try ty.qual.dump(w);
     switch (ty.specifier) {
         .pointer => {
             try w.writeAll("*");
-            try ty.data.sub_type.dump(w);
+            try ty.data.sub_type.dump(si, w);
         },
         .func, .var_args_func, .old_style_func => {
             try w.writeAll("fn (");
             for (ty.data.func.params) |param, i| {
                 if (i != 0) try w.writeAll(", ");
                 if (param.name.len != 0) try w.print("{s}: ", .{param.name});
-                try param.ty.dump(w);
+                try param.ty.dump(si, w);
             }
             if (ty.specifier != .func) {
                 if (ty.data.func.params.len != 0) try w.writeAll(", ");
                 try w.writeAll("...");
             }
             try w.writeAll(") ");
-            try ty.data.func.return_type.dump(w);
+            try ty.data.func.return_type.dump(si, w);
         },
         .array, .static_array, .decayed_array, .decayed_static_array => {
             if (ty.specifier == .decayed_array or ty.specifier == .decayed_static_array) try w.writeByte('d');
             try w.writeByte('[');
             if (ty.specifier == .static_array or ty.specifier == .decayed_static_array) try w.writeAll("static ");
             try w.print("{d}]", .{ty.data.array.len});
-            try ty.data.array.elem.dump(w);
+            try ty.data.array.elem.dump(si, w);
         },
         .vector => {
             try w.print("vector({d}, ", .{ty.data.array.len});
-            try ty.data.array.elem.dump(w);
+            try ty.data.array.elem.dump(si, w);
             try w.writeAll(")");
         },
         .incomplete_array, .decayed_incomplete_array => {
             if (ty.specifier == .decayed_incomplete_array) try w.writeByte('d');
             try w.writeAll("[]");
-            try ty.data.array.elem.dump(w);
+            try ty.data.array.elem.dump(si, w);
         },
         .@"enum" => {
             const enum_ty = ty.data.@"enum";
             if (enum_ty.isIncomplete() and !enum_ty.fixed) {
-                try w.print("enum {s}", .{enum_ty.name});
+                try w.print("enum {s}", .{si.getString(enum_ty.name)});
             } else {
-                try w.print("enum {s}: ", .{enum_ty.name});
-                try enum_ty.tag_ty.dump(w);
+                try w.print("enum {s}: ", .{si.getString(enum_ty.name)});
+                try enum_ty.tag_ty.dump(si, w);
             }
-            if (dump_detailed_containers) try dumpEnum(enum_ty, w);
+            if (dump_detailed_containers) try dumpEnum(enum_ty, si, w);
         },
         .@"struct" => {
             try w.print("struct {s}", .{ty.data.record.name});
-            if (dump_detailed_containers) try dumpRecord(ty.data.record, w);
+            if (dump_detailed_containers) try dumpRecord(ty.data.record, si, w);
         },
         .@"union" => {
             try w.print("union {s}", .{ty.data.record.name});
-            if (dump_detailed_containers) try dumpRecord(ty.data.record, w);
+            if (dump_detailed_containers) try dumpRecord(ty.data.record, si, w);
         },
         .unspecified_variable_len_array, .decayed_unspecified_variable_len_array => {
             if (ty.specifier == .decayed_unspecified_variable_len_array) try w.writeByte('d');
             try w.writeAll("[*]");
-            try ty.data.sub_type.dump(w);
+            try ty.data.sub_type.dump(si, w);
         },
         .variable_len_array, .decayed_variable_len_array => {
             if (ty.specifier == .decayed_variable_len_array) try w.writeByte('d');
             try w.writeAll("[<expr>]");
-            try ty.data.expr.ty.dump(w);
+            try ty.data.expr.ty.dump(si, w);
         },
         .typeof_type, .decayed_typeof_type => {
             try w.writeAll("typeof(");
-            try ty.data.sub_type.dump(w);
+            try ty.data.sub_type.dump(si, w);
             try w.writeAll(")");
         },
         .typeof_expr, .decayed_typeof_expr => {
             try w.writeAll("typeof(<expr>: ");
-            try ty.data.expr.ty.dump(w);
+            try ty.data.expr.ty.dump(si, w);
             try w.writeAll(")");
         },
         .attributed => {
             try w.writeAll("attributed(");
-            try ty.data.attributed.base.dump(w);
+            try ty.data.attributed.base.dump(si, w);
             try w.writeAll(")");
         },
         .special_va_start => try w.writeAll("(va start param)"),
@@ -2146,19 +2148,19 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
     }
 }
 
-fn dumpEnum(@"enum": *Enum, w: anytype) @TypeOf(w).Error!void {
+fn dumpEnum(@"enum": *Enum, si: *const StringInterner, w: anytype) @TypeOf(w).Error!void {
     try w.writeAll(" {");
     for (@"enum".fields) |field| {
-        try w.print(" {s} = {d},", .{ field.name, field.value });
+        try w.print(" {s} = {d},", .{ si.getString(field.name), field.value });
     }
     try w.writeAll(" }");
 }
 
-fn dumpRecord(record: *Record, w: anytype) @TypeOf(w).Error!void {
+fn dumpRecord(record: *Record, si: *const StringInterner, w: anytype) @TypeOf(w).Error!void {
     try w.writeAll(" {");
     for (record.fields) |field| {
         try w.writeByte(' ');
-        try field.ty.dump(w);
+        try field.ty.dump(si, w);
         try w.print(" {s}: {d};", .{ field.name, field.bit_width });
     }
     try w.writeAll(" }");

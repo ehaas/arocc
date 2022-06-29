@@ -19,6 +19,7 @@ const CharInfo = @import("CharInfo.zig");
 const Value = @import("Value.zig");
 const SymbolStack = @import("SymbolStack.zig");
 const Symbol = SymbolStack.Symbol;
+const StringInterner = @import("StringInterner.zig");
 
 const Parser = @This();
 
@@ -344,7 +345,7 @@ pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
     const strings_top = p.strings.items.len;
     defer p.strings.items.len = strings_top;
 
-    try ty.print(p.strings.writer());
+    try ty.print(&p.comp.string_interner, p.strings.writer());
     return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[strings_top..]);
 }
 
@@ -357,11 +358,11 @@ pub fn typePairStrExtra(p: *Parser, a: Type, msg: []const u8, b: Type) ![]const 
     defer p.strings.items.len = strings_top;
 
     try p.strings.append('\'');
-    try a.print(p.strings.writer());
+    try a.print(&p.comp.string_interner, p.strings.writer());
     try p.strings.append('\'');
     try p.strings.appendSlice(msg);
     try p.strings.append('\'');
-    try b.print(p.strings.writer());
+    try b.print(&p.comp.string_interner, p.strings.writer());
     try p.strings.append('\'');
     return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[strings_top..]);
 }
@@ -1976,14 +1977,14 @@ fn enumSpec(p: *Parser) Error!Type {
             return prev.ty;
         } else {
             // this is a forward declaration, create a new enum Type.
-            const enum_ty = try Type.Enum.create(p.arena, p.tokSlice(ident), fixed_ty);
+            const enum_ty = try Type.Enum.create(p.arena, try p.comp.intern(p.tokSlice(ident)), fixed_ty);
             const ty = try Attribute.applyTypeAttributes(p, .{
                 .specifier = .@"enum",
                 .data = .{ .@"enum" = enum_ty },
             }, attr_buf_top, null);
             try p.syms.syms.append(p.gpa, .{
                 .kind = .@"enum",
-                .name = enum_ty.name,
+                .name = p.comp.string_interner.getString(enum_ty.name), // TODO: use string interner for symbol stack
                 .tok = ident,
                 .ty = ty,
                 .val = .{},
@@ -2015,8 +2016,8 @@ fn enumSpec(p: *Parser) Error!Type {
                 break :enum_ty enum_ty;
             }
         }
-        break :enum_ty try Type.Enum.create(p.arena, p.tokSlice(ident), fixed_ty);
-    } else try Type.Enum.create(p.arena, try p.getAnonymousName(enum_tok), fixed_ty);
+        break :enum_ty try Type.Enum.create(p.arena, try p.comp.intern(p.tokSlice(ident)), fixed_ty);
+    } else try Type.Enum.create(p.arena, try p.comp.intern(try p.getAnonymousName(enum_tok)), fixed_ty);
 
     // reserve space for this enum
     try p.decl_buf.append(.none);
@@ -6001,7 +6002,7 @@ fn validateFieldAccess(p: *Parser, record_ty: Type, expr_ty: Type, field_name_to
     p.strings.items.len = 0;
 
     try p.strings.writer().print("'{s}' in '", .{field_name});
-    try expr_ty.print(p.strings.writer());
+    try expr_ty.print(&p.comp.string_interner, p.strings.writer());
     try p.strings.append('\'');
 
     const duped = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items);
@@ -6302,7 +6303,7 @@ fn primaryExpr(p: *Parser) Error!Result {
                 ty = some.ty;
             } else if (p.func.ty) |func_ty| {
                 p.strings.items.len = 0;
-                try Type.printNamed(func_ty, p.tokSlice(p.func.name), p.strings.writer());
+                try Type.printNamed(func_ty, p.tokSlice(p.func.name), &p.comp.string_interner, p.strings.writer());
                 try p.strings.append(0);
                 const predef = try p.makePredefinedIdentifier();
                 ty = predef.ty;

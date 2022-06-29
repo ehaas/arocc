@@ -5,6 +5,7 @@ const Compilation = @import("Compilation.zig");
 const Source = @import("Source.zig");
 const Attribute = @import("Attribute.zig");
 const Value = @import("Value.zig");
+const StringInterner = @import("StringInterner.zig");
 
 const Tree = @This();
 
@@ -674,7 +675,7 @@ fn dumpNode(tree: Tree, node: NodeIndex, level: u32, w: anytype) @TypeOf(w).Erro
     }
     if (tree.comp.diag.color) util.setColor(TYPE, w);
     try w.writeByte('\'');
-    try ty.dump(w);
+    try ty.dump(&tree.comp.string_interner, w);
     try w.writeByte('\'');
 
     if (isLval(tree.nodes, tree.data, tree.value_map, node)) {
