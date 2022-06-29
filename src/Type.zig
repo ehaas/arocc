@@ -98,7 +98,7 @@ pub const Func = struct {
     params: []Param,
 
     pub const Param = struct {
-        name: []const u8,
+        name: StringInterner.Id,
         ty: Type,
         name_tok: TokenIndex,
     };
@@ -2073,7 +2073,8 @@ pub fn dump(ty: Type, si: *const StringInterner, w: anytype) @TypeOf(w).Error!vo
             try w.writeAll("fn (");
             for (ty.data.func.params) |param, i| {
                 if (i != 0) try w.writeAll(", ");
-                if (param.name.len != 0) try w.print("{s}: ", .{param.name});
+                const param_name = si.getString(param.name);
+                if (param_name.len != 0) try w.print("{s}: ", .{param_name});
                 try param.ty.dump(si, w);
             }
             if (ty.specifier != .func) {

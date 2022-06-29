@@ -840,7 +840,7 @@ fn decl(p: *Parser) Error!bool {
                     const name_str = p.tokSlice(d.name);
                     const interned_name = try p.comp.intern(name_str);
                     for (init_d.d.ty.params()) |*param| {
-                        if (mem.eql(u8, param.name, name_str)) {
+                        if (param.name == interned_name) {
                             param.ty = d.ty;
                             break;
                         }
@@ -866,7 +866,7 @@ fn decl(p: *Parser) Error!bool {
                 if (param.ty.hasUnboundVLA()) try p.errTok(.unbound_vla, param.name_tok);
                 if (param.ty.hasIncompleteSize() and !param.ty.is(.void)) try p.errStr(.parameter_incomplete_ty, param.name_tok, try p.typeStr(param.ty));
 
-                if (param.name.len == 0) {
+                if (p.comp.string_interner.getString(param.name).len == 0) {
                     try p.errTok(.omitting_parameter_name, param.name_tok);
                     continue;
                 }
@@ -874,7 +874,7 @@ fn decl(p: *Parser) Error!bool {
                 // bypass redefinition check to avoid duplicate errors
                 try p.syms.syms.append(p.gpa, .{
                     .kind = .def,
-                    .name = try p.comp.intern(param.name),
+                    .name = param.name,
                     .tok = param.name_tok,
                     .ty = param.ty,
                     .val = .{},
@@ -2561,9 +2561,10 @@ fn directDeclarator(p: *Parser, base_type: Type, d: *Declarator, kind: Declarato
             specifier = .old_style_func;
             while (true) {
                 const name_tok = try p.expectIdentifier();
-                try p.syms.defineParam(p, undefined, name_tok);
+                const interned_name = try p.comp.intern(p.tokSlice(name_tok));
+                try p.syms.defineParam(p, undefined, name_tok, interned_name);
                 try p.param_buf.append(.{
-                    .name = p.tokSlice(name_tok),
+                    .name = interned_name,
                     .name_tok = name_tok,
                     .ty = .{ .specifier = .int },
                 });
@@ -2634,7 +2635,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Func.Param {
             name_tok = some.name;
             param_ty = some.ty;
             if (some.name != 0) {
-                try p.syms.defineParam(p, param_ty, name_tok);
+                try p.syms.defineParam(p, param_ty, name_tok, try p.comp.intern(p.tokSlice(name_tok)));
             }
         }
         param_ty = try Attribute.applyParameterAttributes(p, param_ty, attr_buf_top, .alignas_on_param);
@@ -2665,8 +2666,9 @@ fn paramDecls(p: *Parser) Error!?[]Type.Func.Param {
         }
 
         try param_decl_spec.validateParam(p, &param_ty);
+        const name = if (name_tok == 0) "" else p.tokSlice(name_tok);
         try p.param_buf.append(.{
-            .name = if (name_tok == 0) "" else p.tokSlice(name_tok),
+            .name = try p.comp.intern(name),
             .name_tok = if (name_tok == 0) first_tok else name_tok,
             .ty = param_ty,
         });
@@ -6096,7 +6098,7 @@ fn callExpr(p: *Parser, lhs: Result) Error!Result {
             const last_param_name = func_params[func_params.len - 1].name;
             const decl_ref = p.getNode(raw_arg_node, .decl_ref_expr);
             if (decl_ref == null or
-                !mem.eql(u8, p.tokSlice(p.nodes.items(.data)[@enumToInt(decl_ref.?)].decl_ref), last_param_name))
+                try p.comp.intern(p.tokSlice(p.nodes.items(.data)[@enumToInt(decl_ref.?)].decl_ref)) != last_param_name)
             {
                 try p.errTok(.va_start_not_last_param, param_tok);
             }

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Compilation = @import("Compilation.zig");
+const StringInterner = @import("StringInterner.zig");
 const Type = @import("Type.zig");
 
 const Builtins = @This();
@@ -35,12 +36,13 @@ fn add(
     name: []const u8,
     ret_ty: Type,
     param_types: []const Type,
+    param_name: StringInterner.Id,
     spec: Type.Specifier,
     attrs: Builtin.Attributes,
 ) void {
     var params = a.alloc(Type.Func.Param, param_types.len) catch unreachable; // fib
     for (param_types) |param_ty, i| {
-        params[i] = .{ .name_tok = 0, .ty = param_ty, .name = "" };
+        params[i] = .{ .name_tok = 0, .ty = param_ty, .name = param_name };
     }
     b.putAssumeCapacity(name, .{
         .spec = spec,
@@ -68,9 +70,10 @@ pub fn create(comp: *Compilation) !Builtins {
     var va_list = comp.types.va_list;
     if (va_list.isArray()) va_list.decayArray();
 
-    add(a, &b, "__builtin_va_start", void_ty, &.{ va_list, .{ .specifier = .special_va_start } }, .func, .{});
-    add(a, &b, "__builtin_va_end", void_ty, &.{va_list}, .func, .{});
-    add(a, &b, "__builtin_va_copy", void_ty, &.{ va_list, va_list }, .func, .{});
+    const param_name = try comp.intern("");
+    add(a, &b, "__builtin_va_start", void_ty, &.{ va_list, .{ .specifier = .special_va_start } }, param_name, .func, .{});
+    add(a, &b, "__builtin_va_end", void_ty, &.{va_list}, param_name, .func, .{});
+    add(a, &b, "__builtin_va_copy", void_ty, &.{ va_list, va_list }, param_name, .func, .{});
 
     return Builtins{ ._builtins = b, ._params = _params };
 }

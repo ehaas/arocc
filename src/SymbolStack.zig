@@ -275,9 +275,7 @@ pub fn declareSymbol(
     });
 }
 
-pub fn defineParam(s: *SymbolStack, p: *Parser, ty: Type, tok: TokenIndex) !void {
-    const name = p.tokSlice(tok);
-    const interned_name = try p.comp.intern(name);
+pub fn defineParam(s: *SymbolStack, p: *Parser, ty: Type, tok: TokenIndex, interned_name: StringInterner.Id) !void {
     const kinds = s.syms.items(.kind);
     const names = s.syms.items(.name);
     const end = s.scopeEnd();
@@ -286,7 +284,7 @@ pub fn defineParam(s: *SymbolStack, p: *Parser, ty: Type, tok: TokenIndex) !void
         i -= 1;
         switch (kinds[i]) {
             .enumeration, .decl, .def => if (names[i] == interned_name) {
-                try p.errStr(.redefinition_of_parameter, tok, name);
+                try p.errStr(.redefinition_of_parameter, tok, p.tokSlice(tok));
                 try p.errTok(.previous_definition, s.syms.items(.tok)[i]);
                 break;
             },
