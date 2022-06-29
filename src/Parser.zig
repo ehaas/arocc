@@ -2304,7 +2304,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         } },
     });
     return EnumFieldAndNode{ .field = .{
-        .name = p.tokSlice(name_tok),
+        .name = try p.comp.intern(p.tokSlice(name_tok)),
         .ty = res.ty,
         .name_tok = name_tok,
         .node = res.node,

@@ -142,7 +142,7 @@ pub const Enum = struct {
     fixed: bool,
 
     pub const Field = struct {
-        name: []const u8,
+        name: StringInterner.Id,
         ty: Type,
         name_tok: TokenIndex,
         node: NodeIndex,
