@@ -7,7 +7,6 @@ const Tree = aro.Tree;
 const Token = Tree.Token;
 const NodeIndex = Tree.NodeIndex;
 const AllocatorError = std.mem.Allocator.Error;
-const StringInterner = aro.StringInterner;
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -173,7 +172,6 @@ pub fn main() !void {
         case_node.activate();
         defer case_node.end();
         progress.refresh();
-
         const file = comp.addSourceFromPath(path) catch |err| {
             fail_count += 1;
             progress.log("could not add source '{s}': {s}\n", .{ path, @errorName(err) });

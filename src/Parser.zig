@@ -743,7 +743,7 @@ fn decl(p: *Parser) Error!bool {
     var init_d = (try p.initDeclarator(&decl_spec, attr_buf_top)) orelse {
         _ = try p.expectToken(.semicolon);
         if (decl_spec.ty.is(.@"enum") or
-            (decl_spec.ty.isRecord() and !decl_spec.ty.isAnonymousRecord() and
+            (decl_spec.ty.isRecord() and !decl_spec.ty.isAnonymousRecord(&p.comp.string_interner) and
             !decl_spec.ty.isTypeof())) // we follow GCC and clang's behavior here
         {
             const specifier = decl_spec.ty.canonicalize(.standard).specifier;
@@ -1597,6 +1597,7 @@ fn typeSpec(p: *Parser, ty: *Type.Builder) Error!bool {
     return p.tok_i != start;
 }
 
+/// TODO: intern and free
 fn getAnonymousName(p: *Parser, kind_tok: TokenIndex) ![]const u8 {
     const loc = p.pp.tokens.items(.loc)[kind_tok];
     const source = p.comp.getSource(loc.id);
@@ -1636,14 +1637,14 @@ fn recordSpec(p: *Parser) Error!Type {
             return prev.ty;
         } else {
             // this is a forward declaration, create a new record Type.
-            const record_ty = try Type.Record.create(p.arena, p.tokSlice(ident));
+            const record_ty = try Type.Record.create(p.arena, try p.comp.intern(p.tokSlice(ident)));
             const ty = try Attribute.applyTypeAttributes(p, .{
                 .specifier = if (is_struct) .@"struct" else .@"union",
                 .data = .{ .record = record_ty },
             }, attr_buf_top, null);
             try p.syms.syms.append(p.gpa, .{
                 .kind = if (is_struct) .@"struct" else .@"union",
-                .name = record_ty.name,
+                .name = p.tokSlice(ident),
                 .tok = ident,
                 .ty = ty,
                 .val = .{},
@@ -1673,8 +1674,8 @@ fn recordSpec(p: *Parser) Error!Type {
                 break :record_ty prev.ty.get(if (is_struct) .@"struct" else .@"union").?.data.record;
             }
         }
-        break :record_ty try Type.Record.create(p.arena, p.tokSlice(ident));
-    } else try Type.Record.create(p.arena, try p.getAnonymousName(kind_tok));
+        break :record_ty try Type.Record.create(p.arena, try p.comp.intern(p.tokSlice(ident)));
+    } else try Type.Record.create(p.arena, try p.comp.intern(try p.getAnonymousName(kind_tok)));
 
     // Initially create ty as a regular non-attributed type, since attributes for a record
     // can be specified after the closing rbrace, which we haven't encountered yet.
@@ -1874,7 +1875,7 @@ fn recordDeclarator(p: *Parser) Error!bool {
 
         if (name_tok == 0 and bits_node == .none) unnamed: {
             if (ty.is(.@"enum") or ty.hasIncompleteSize()) break :unnamed;
-            if (ty.isAnonymousRecord()) {
+            if (ty.isAnonymousRecord(&p.comp.string_interner)) {
                 // An anonymous record appears as indirect fields on the parent
                 try p.record_buf.append(.{
                     .name = try p.getAnonymousName(first_tok),
@@ -1984,7 +1985,7 @@ fn enumSpec(p: *Parser) Error!Type {
             }, attr_buf_top, null);
             try p.syms.syms.append(p.gpa, .{
                 .kind = .@"enum",
-                .name = p.comp.string_interner.getString(enum_ty.name), // TODO: use string interner for symbol stack
+                .name = p.tokSlice(ident), // TODO: use string interner for symbol stack
                 .tok = ident,
                 .ty = ty,
                 .val = .{},

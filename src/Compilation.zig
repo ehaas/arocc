@@ -429,7 +429,7 @@ fn generateVaListType(comp: *Compilation) !Type {
         .aarch64_va_list => {
             const record_ty = try arena.create(Type.Record);
             record_ty.* = .{
-                .name = "__va_list_tag",
+                .name = try comp.intern("__va_list_tag"),
                 .fields = try arena.alloc(Type.Record.Field, 5),
                 .size = 32,
                 .alignment = 8,
@@ -448,7 +448,7 @@ fn generateVaListType(comp: *Compilation) !Type {
         .x86_64_va_list => {
             const record_ty = try arena.create(Type.Record);
             record_ty.* = .{
-                .name = "__va_list_tag",
+                .name = try comp.intern("__va_list_tag"),
                 .fields = try arena.alloc(Type.Record.Field, 4),
                 .size = 24,
                 .alignment = 8,

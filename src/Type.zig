@@ -165,7 +165,7 @@ pub const Enum = struct {
 
 // TODO improve memory usage
 pub const Record = struct {
-    name: []const u8,
+    name: StringInterner.Id,
     fields: []Field,
     size: u64,
     alignment: u29,
@@ -191,7 +191,7 @@ pub const Record = struct {
         return r.fields.len == std.math.maxInt(usize);
     }
 
-    pub fn create(allocator: std.mem.Allocator, name: []const u8) !*Record {
+    pub fn create(allocator: std.mem.Allocator, name: StringInterner.Id) !*Record {
         var r = try allocator.create(Record);
         r.name = name;
         r.fields.len = std.math.maxInt(usize);
@@ -480,14 +480,14 @@ pub fn isRecord(ty: Type) bool {
     };
 }
 
-pub fn isAnonymousRecord(ty: Type) bool {
+pub fn isAnonymousRecord(ty: Type, si: *const StringInterner) bool {
     return switch (ty.specifier) {
         // anonymous records can be recognized by their names which are in
         // the format "(anonymous TAG at path:line:col)".
-        .@"struct", .@"union" => ty.data.record.name[0] == '(',
-        .typeof_type => ty.data.sub_type.isAnonymousRecord(),
-        .typeof_expr => ty.data.expr.ty.isAnonymousRecord(),
-        .attributed => ty.data.attributed.base.isAnonymousRecord(),
+        .@"struct", .@"union" => si.getString(ty.data.record.name)[0] == '(',
+        .typeof_type => ty.data.sub_type.isAnonymousRecord(si),
+        .typeof_expr => ty.data.expr.ty.isAnonymousRecord(si),
+        .attributed => ty.data.attributed.base.isAnonymousRecord(si),
         else => false,
     };
 }
@@ -1971,8 +1971,8 @@ fn printPrologue(ty: Type, si: *const StringInterner, w: anytype) @TypeOf(w).Err
         } else {
             try w.print("enum {s}", .{si.getString(ty.data.@"enum".name)});
         },
-        .@"struct" => try w.print("struct {s}", .{ty.data.record.name}),
-        .@"union" => try w.print("union {s}", .{ty.data.record.name}),
+        .@"struct" => try w.print("struct {s}", .{si.getString(ty.data.record.name)}),
+        .@"union" => try w.print("union {s}", .{si.getString(ty.data.record.name)}),
         .vector => {
             const len = ty.data.array.len;
             const elem_ty = ty.data.array.elem;
@@ -2111,11 +2111,11 @@ pub fn dump(ty: Type, si: *const StringInterner, w: anytype) @TypeOf(w).Error!vo
             if (dump_detailed_containers) try dumpEnum(enum_ty, si, w);
         },
         .@"struct" => {
-            try w.print("struct {s}", .{ty.data.record.name});
+            try w.print("struct {s}", .{si.getString(ty.data.record.name)});
             if (dump_detailed_containers) try dumpRecord(ty.data.record, si, w);
         },
         .@"union" => {
-            try w.print("union {s}", .{ty.data.record.name});
+            try w.print("union {s}", .{si.getString(ty.data.record.name)});
             if (dump_detailed_containers) try dumpRecord(ty.data.record, si, w);
         },
         .unspecified_variable_len_array, .decayed_unspecified_variable_len_array => {
