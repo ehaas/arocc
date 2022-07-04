@@ -11,6 +11,7 @@ const Tokenizer = @import("Tokenizer.zig");
 const Token = Tokenizer.Token;
 const Type = @import("Type.zig");
 const Pragma = @import("Pragma.zig");
+const StringInterner = @import("StringInterner.zig");
 
 const Compilation = @This();
 
@@ -41,6 +42,7 @@ types: struct {
 } = undefined,
 /// Mapping from Source.Id to byte offset of first non-utf8 byte
 invalid_utf8_locs: std.AutoHashMapUnmanaged(Source.Id, u32) = .{},
+string_interner: StringInterner = .{},
 
 pub fn init(gpa: Allocator) Compilation {
     return .{
@@ -72,6 +74,11 @@ pub fn deinit(comp: *Compilation) void {
     comp.generated_buf.deinit();
     comp.builtins.deinit(comp.gpa);
     comp.invalid_utf8_locs.deinit(comp.gpa);
+    comp.string_interner.deinit(comp.gpa);
+}
+
+pub fn intern(comp: *Compilation, str: []const u8) !StringInterner.StringId {
+    return comp.string_interner.intern(comp.gpa, str);
 }
 
 fn generateDateAndTime(w: anytype) !void {
@@ -346,7 +353,7 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
 
 fn generateTypeMacro(w: anytype, name: []const u8, ty: Type) !void {
     try w.print("#define {s} ", .{name});
-    try ty.print(w);
+    try ty.print(undefined, w);
     try w.writeByte('\n');
 }
 
@@ -422,7 +429,7 @@ fn generateVaListType(comp: *Compilation) !Type {
         .aarch64_va_list => {
             const record_ty = try arena.create(Type.Record);
             record_ty.* = .{
-                .name = "__va_list_tag",
+                .name = try comp.intern("__va_list_tag"),
                 .fields = try arena.alloc(Type.Record.Field, 5),
                 .size = 32,
                 .alignment = 8,
@@ -431,17 +438,17 @@ fn generateVaListType(comp: *Compilation) !Type {
             const void_ty = try arena.create(Type);
             void_ty.* = .{ .specifier = .void };
             const void_ptr = Type{ .specifier = .pointer, .data = .{ .sub_type = void_ty } };
-            record_ty.fields[0] = .{ .name = "__stack", .ty = void_ptr };
-            record_ty.fields[1] = .{ .name = "__gr_top", .ty = void_ptr };
-            record_ty.fields[2] = .{ .name = "__vr_top", .ty = void_ptr };
-            record_ty.fields[3] = .{ .name = "__gr_offs", .ty = .{ .specifier = .int } };
-            record_ty.fields[4] = .{ .name = "__vr_offs", .ty = .{ .specifier = .int } };
+            record_ty.fields[0] = .{ .name = try comp.intern("__stack"), .ty = void_ptr };
+            record_ty.fields[1] = .{ .name = try comp.intern("__gr_top"), .ty = void_ptr };
+            record_ty.fields[2] = .{ .name = try comp.intern("__vr_top"), .ty = void_ptr };
+            record_ty.fields[3] = .{ .name = try comp.intern("__gr_offs"), .ty = .{ .specifier = .int } };
+            record_ty.fields[4] = .{ .name = try comp.intern("__vr_offs"), .ty = .{ .specifier = .int } };
             ty = .{ .specifier = .@"struct", .data = .{ .record = record_ty } };
         },
         .x86_64_va_list => {
             const record_ty = try arena.create(Type.Record);
             record_ty.* = .{
-                .name = "__va_list_tag",
+                .name = try comp.intern("__va_list_tag"),
                 .fields = try arena.alloc(Type.Record.Field, 4),
                 .size = 24,
                 .alignment = 8,
@@ -450,10 +457,10 @@ fn generateVaListType(comp: *Compilation) !Type {
             const void_ty = try arena.create(Type);
             void_ty.* = .{ .specifier = .void };
             const void_ptr = Type{ .specifier = .pointer, .data = .{ .sub_type = void_ty } };
-            record_ty.fields[0] = .{ .name = "gp_offset", .ty = .{ .specifier = .uint } };
-            record_ty.fields[1] = .{ .name = "fp_offset", .ty = .{ .specifier = .uint } };
-            record_ty.fields[2] = .{ .name = "overflow_arg_area", .ty = void_ptr };
-            record_ty.fields[3] = .{ .name = "reg_save_area", .ty = void_ptr };
+            record_ty.fields[0] = .{ .name = try comp.intern("gp_offset"), .ty = .{ .specifier = .uint } };
+            record_ty.fields[1] = .{ .name = try comp.intern("fp_offset"), .ty = .{ .specifier = .uint } };
+            record_ty.fields[2] = .{ .name = try comp.intern("overflow_arg_area"), .ty = void_ptr };
+            record_ty.fields[3] = .{ .name = try comp.intern("reg_save_area"), .ty = void_ptr };
             ty = .{ .specifier = .@"struct", .data = .{ .record = record_ty } };
         },
     }
