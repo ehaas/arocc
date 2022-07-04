@@ -874,6 +874,17 @@ pub fn pragmaEvent(comp: *Compilation, event: PragmaEvent) void {
     }
 }
 
+pub fn locSlice(comp: *const Compilation, loc: Source.Location) []const u8 {
+    var tmp_tokenizer = Tokenizer{
+        .buf = comp.getSource(loc.id).buf,
+        .comp = comp,
+        .index = loc.byte_offset,
+        .source = .generated,
+    };
+    const res = tmp_tokenizer.next();
+    return res.id.lexeme() orelse tmp_tokenizer.buf[res.start..res.end];
+}
+
 pub const renderErrors = Diagnostics.render;
 
 pub fn isTlsSupported(comp: *Compilation) bool {

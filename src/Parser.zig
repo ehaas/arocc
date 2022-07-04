@@ -256,16 +256,7 @@ fn expectToken(p: *Parser, expected: Token.Id) Error!TokenIndex {
 }
 
 pub fn tokSlice(p: *Parser, tok: TokenIndex) []const u8 {
-    if (p.tok_ids[tok].lexeme()) |some| return some;
-    const loc = p.pp.tokens.items(.loc)[tok];
-    var tmp_tokenizer = Tokenizer{
-        .buf = p.comp.getSource(loc.id).buf,
-        .comp = p.comp,
-        .index = loc.byte_offset,
-        .source = .generated,
-    };
-    const res = tmp_tokenizer.next();
-    return tmp_tokenizer.buf[res.start..res.end];
+    return p.comp.locSlice(p.pp.tokens.items(.loc)[tok]);
 }
 
 fn expectClosing(p: *Parser, opening: TokenIndex, id: Token.Id) Error!void {

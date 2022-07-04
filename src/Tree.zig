@@ -592,16 +592,7 @@ pub fn dumpStr(bytes: []const u8, tag: Tag, writer: anytype) !void {
 }
 
 pub fn tokSlice(tree: Tree, tok_i: TokenIndex) []const u8 {
-    if (tree.tokens.items(.id)[tok_i].lexeme()) |some| return some;
-    const loc = tree.tokens.items(.loc)[tok_i];
-    var tmp_tokenizer = Tokenizer{
-        .buf = tree.comp.getSource(loc.id).buf,
-        .comp = tree.comp,
-        .index = loc.byte_offset,
-        .source = .generated,
-    };
-    const tok = tmp_tokenizer.next();
-    return tmp_tokenizer.buf[tok.start..tok.end];
+    return tree.comp.locSlice(tree.tokens.items(.loc)[tok_i]);
 }
 
 pub fn dump(tree: Tree, writer: anytype) @TypeOf(writer).Error!void {
