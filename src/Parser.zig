@@ -1592,12 +1592,7 @@ fn typeSpec(p: *Parser, ty: *Type.Builder) Error!bool {
     return p.tok_i != start;
 }
 
-fn getInternedAnonymousName(p: *Parser, kind_tok: TokenIndex) !Compilation.StringId {
-    const name = try p.getAnonymousName(kind_tok);
-    return p.comp.internString(name);
-}
-
-fn getAnonymousName(p: *Parser, kind_tok: TokenIndex) ![]const u8 {
+fn getAnonymousName(p: *Parser, kind_tok: TokenIndex) !Compilation.StringId {
     const loc = p.pp.tokens.items(.loc)[kind_tok];
     const source = p.comp.getSource(loc.id);
     const line_col = source.lineCol(loc);
@@ -1607,11 +1602,14 @@ fn getAnonymousName(p: *Parser, kind_tok: TokenIndex) ![]const u8 {
         else => "record field",
     };
 
-    return std.fmt.allocPrint(
-        p.arena,
+    const strings_top = p.strings.items.len;
+    defer p.strings.items.len = strings_top;
+    try p.strings.writer().print(
         "(anonymous {s} at {s}:{d}:{d})",
         .{ kind_str, source.path, line_col.line_no, line_col.col },
     );
+    const name = p.strings.items[strings_top..];
+    return p.comp.internString(name);
 }
 
 /// recordSpec
@@ -1676,7 +1674,7 @@ fn recordSpec(p: *Parser) Error!Type {
             }
         }
         break :record_ty try Type.Record.create(p.arena, interned_name);
-    } else try Type.Record.create(p.arena, try p.getInternedAnonymousName(kind_tok));
+    } else try Type.Record.create(p.arena, try p.getAnonymousName(kind_tok));
 
     // Initially create ty as a regular non-attributed type, since attributes for a record
     // can be specified after the closing rbrace, which we haven't encountered yet.
@@ -1879,7 +1877,7 @@ fn recordDeclarator(p: *Parser) Error!bool {
             if (p.comp.isAnonymousRecord(ty, p.pp.tokens.items(.loc))) {
                 // An anonymous record appears as indirect fields on the parent
                 try p.record_buf.append(.{
-                    .name = try p.getInternedAnonymousName(first_tok),
+                    .name = try p.getAnonymousName(first_tok),
                     .ty = ty,
                     .bit_width = 0,
                 });
@@ -1895,7 +1893,7 @@ fn recordDeclarator(p: *Parser) Error!bool {
             try p.err(.missing_declaration);
         } else {
             try p.record_buf.append(.{
-                .name = if (name_tok != 0) try p.comp.intern(name_tok, p.pp.tokens.items(.loc)) else try p.getInternedAnonymousName(first_tok),
+                .name = if (name_tok != 0) try p.comp.intern(name_tok, p.pp.tokens.items(.loc)) else try p.getAnonymousName(first_tok),
                 .ty = ty,
                 .name_tok = name_tok,
                 .bit_width = bits,
@@ -2021,7 +2019,7 @@ fn enumSpec(p: *Parser) Error!Type {
             }
         }
         break :enum_ty try Type.Enum.create(p.arena, interned_name, fixed_ty);
-    } else try Type.Enum.create(p.arena, try p.getInternedAnonymousName(enum_tok), fixed_ty);
+    } else try Type.Enum.create(p.arena, try p.getAnonymousName(enum_tok), fixed_ty);
 
     // reserve space for this enum
     try p.decl_buf.append(.none);
