@@ -1282,7 +1282,7 @@ fn applyTransparentUnion(attr: Attribute, p: *Parser, tok: TokenIndex, ty: Type)
     for (fields[1..]) |field| {
         const field_size = field.ty.bitSizeof(p.comp).?;
         if (field_size == first_field_size) continue;
-        const str = try std.fmt.allocPrint(p.comp.diag.arena.allocator(), "'{s}' ({d}", .{ field.name, field_size });
+        const str = try std.fmt.allocPrint(p.comp.diag.arena.allocator(), "'{s}' ({d}", .{ p.comp.getString(field.name, p.pp.tokens.items(.loc)), field_size });
         try p.errStr(.transparent_union_size, field.name_tok, str);
         return p.errExtra(.transparent_union_size_note, fields[0].name_tok, .{ .unsigned = first_field_size });
     }

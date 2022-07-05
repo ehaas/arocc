@@ -19,6 +19,60 @@ pub const Error = error{
     FatalError,
 } || Allocator.Error;
 
+pub const StringId = enum(u32) {
+    empty = 0xFFFF_FFFF,
+    _,
+};
+
+const StringToIdMap = std.HashMapUnmanaged(StringId, void, StringIdContext, std.hash_map.default_max_load_percentage);
+
+/// Context for actually being able to compare two keys
+const StringIdContext = struct {
+    comp: *const Compilation,
+    locs: []const Source.Location,
+
+    pub fn eql(self: @This(), a: StringId, b: StringId) bool {
+        _ = self;
+        return a == b;
+    }
+
+    pub fn hash(self: @This(), x: StringId) u64 {
+        const as_int = @enumToInt(x);
+        if (as_int & 0x8000_0000 == 0) {
+            const x_slice = self.comp.locSlice(self.locs[as_int]);
+            return std.hash_map.hashString(x_slice);
+        } else {
+            const start = as_int & 0x7FFF_FFFF;
+            const x_slice = mem.sliceTo(@ptrCast([*:0]const u8, self.comp.string_bytes.items.ptr) + start, 0);
+            return std.hash_map.hashString(x_slice);
+        }
+    }
+};
+
+/// Adapter for converting a string to something we can use
+const StringIdAdapter = struct {
+    comp: *const Compilation,
+    locs: []const Source.Location,
+
+    pub fn eql(self: @This(), a_slice: []const u8, b: StringId) bool {
+        const as_int = @enumToInt(b);
+        if (as_int & 0x8000_0000 == 0) {
+            if (self.locs.len == 0) return false;
+            const b_slice = self.comp.locSlice(self.locs[as_int]);
+            return mem.eql(u8, a_slice, b_slice);
+        } else {
+            const start = as_int & 0x7FFF_FFFF;
+            const b_slice = mem.sliceTo(@ptrCast([*:0]const u8, self.comp.string_bytes.items.ptr) + start, 0);
+            return mem.eql(u8, a_slice, b_slice);
+        }
+    }
+
+    pub fn hash(self: @This(), adapted_key: []const u8) u64 {
+        _ = self;
+        return std.hash_map.hashString(adapted_key);
+    }
+};
+
 gpa: Allocator,
 sources: std.StringArrayHashMap(Source),
 diag: Diagnostics,
@@ -41,6 +95,9 @@ types: struct {
 } = undefined,
 /// Mapping from Source.Id to byte offset of first non-utf8 byte
 invalid_utf8_locs: std.AutoHashMapUnmanaged(Source.Id, u32) = .{},
+
+string_bytes: std.ArrayListUnmanaged(u8) = .{},
+string_table: StringToIdMap = .{},
 
 pub fn init(gpa: Allocator) Compilation {
     return .{
@@ -72,6 +129,51 @@ pub fn deinit(comp: *Compilation) void {
     comp.generated_buf.deinit();
     comp.builtins.deinit(comp.gpa);
     comp.invalid_utf8_locs.deinit(comp.gpa);
+    comp.string_bytes.deinit(comp.gpa);
+    comp.string_table.deinit(comp.gpa);
+}
+
+pub fn internString(comp: *Compilation, str: []const u8) !StringId {
+    std.debug.assert(str.len > 0);
+    const val = @intCast(u32, comp.string_bytes.items.len) | 0x8000_0000;
+    const string_id = @intToEnum(StringId, val);
+    try comp.string_bytes.ensureUnusedCapacity(comp.gpa, str.len + 1);
+    comp.string_bytes.appendSliceAssumeCapacity(str);
+    comp.string_bytes.appendAssumeCapacity(0);
+    try comp.string_table.putContext(comp.gpa, string_id, .{}, .{
+        .comp = comp,
+        .locs = &.{},
+    });
+    return string_id;
+}
+
+pub fn intern(comp: *Compilation, tok: u32, locs: []const Source.Location) !StringId {
+    const str = comp.locSlice(locs[tok]);
+    const gop = try comp.string_table.getOrPutContextAdapted(comp.gpa, str, StringIdAdapter{
+        .comp = comp,
+        .locs = locs,
+    }, StringIdContext{
+        .comp = comp,
+        .locs = locs,
+    });
+    if (gop.found_existing) {
+        return gop.key_ptr.*;
+    } else {
+        const val = @intToEnum(StringId, tok);
+        gop.key_ptr.* = val;
+        return val;
+    }
+}
+
+pub fn getString(comp: *const Compilation, string_id: StringId, locs: []const Source.Location) []const u8 {
+    if (string_id == .empty) return "";
+    const as_int = @enumToInt(string_id);
+    if (as_int & 0x8000_0000 == 0) {
+        return comp.locSlice(locs[as_int]);
+    } else {
+        const start = as_int & 0x7FFF_FFFF;
+        return mem.sliceTo(@ptrCast([*:0]const u8, comp.string_bytes.items.ptr) + start, 0);
+    }
 }
 
 fn generateDateAndTime(w: anytype) !void {
@@ -350,6 +452,18 @@ fn generateTypeMacro(w: anytype, name: []const u8, ty: Type) !void {
     try w.writeByte('\n');
 }
 
+pub fn isAnonymousRecord(comp: *const Compilation, ty: Type, locs: []const Source.Location) bool {
+    return switch (ty.specifier) {
+        // anonymous records can be recognized by their names which are in
+        // the format "(anonymous TAG at path:line:col)".
+        .@"struct", .@"union" => comp.getString(ty.data.record.name, locs)[0] == '(',
+        .typeof_type => comp.isAnonymousRecord(ty.data.sub_type.*, locs),
+        .typeof_expr => comp.isAnonymousRecord(ty.data.expr.ty, locs),
+        .attributed => comp.isAnonymousRecord(ty.data.attributed.base, locs),
+        else => false,
+    };
+}
+
 fn generateBuiltinTypes(comp: *Compilation) !void {
     const os = comp.target.os.tag;
     const wchar: Type = switch (comp.target.cpu.arch) {
@@ -422,7 +536,7 @@ fn generateVaListType(comp: *Compilation) !Type {
         .aarch64_va_list => {
             const record_ty = try arena.create(Type.Record);
             record_ty.* = .{
-                .name = "__va_list_tag",
+                .name = try comp.internString("__va_list_tag"),
                 .fields = try arena.alloc(Type.Record.Field, 5),
                 .size = 32,
                 .alignment = 8,
@@ -431,17 +545,17 @@ fn generateVaListType(comp: *Compilation) !Type {
             const void_ty = try arena.create(Type);
             void_ty.* = .{ .specifier = .void };
             const void_ptr = Type{ .specifier = .pointer, .data = .{ .sub_type = void_ty } };
-            record_ty.fields[0] = .{ .name = "__stack", .ty = void_ptr };
-            record_ty.fields[1] = .{ .name = "__gr_top", .ty = void_ptr };
-            record_ty.fields[2] = .{ .name = "__vr_top", .ty = void_ptr };
-            record_ty.fields[3] = .{ .name = "__gr_offs", .ty = .{ .specifier = .int } };
-            record_ty.fields[4] = .{ .name = "__vr_offs", .ty = .{ .specifier = .int } };
+            record_ty.fields[0] = .{ .name = try comp.internString("__stack"), .ty = void_ptr };
+            record_ty.fields[1] = .{ .name = try comp.internString("__gr_top"), .ty = void_ptr };
+            record_ty.fields[2] = .{ .name = try comp.internString("__vr_top"), .ty = void_ptr };
+            record_ty.fields[3] = .{ .name = try comp.internString("__gr_offs"), .ty = .{ .specifier = .int } };
+            record_ty.fields[4] = .{ .name = try comp.internString("__vr_offs"), .ty = .{ .specifier = .int } };
             ty = .{ .specifier = .@"struct", .data = .{ .record = record_ty } };
         },
         .x86_64_va_list => {
             const record_ty = try arena.create(Type.Record);
             record_ty.* = .{
-                .name = "__va_list_tag",
+                .name = try comp.internString("__va_list_tag"),
                 .fields = try arena.alloc(Type.Record.Field, 4),
                 .size = 24,
                 .alignment = 8,
@@ -450,10 +564,10 @@ fn generateVaListType(comp: *Compilation) !Type {
             const void_ty = try arena.create(Type);
             void_ty.* = .{ .specifier = .void };
             const void_ptr = Type{ .specifier = .pointer, .data = .{ .sub_type = void_ty } };
-            record_ty.fields[0] = .{ .name = "gp_offset", .ty = .{ .specifier = .uint } };
-            record_ty.fields[1] = .{ .name = "fp_offset", .ty = .{ .specifier = .uint } };
-            record_ty.fields[2] = .{ .name = "overflow_arg_area", .ty = void_ptr };
-            record_ty.fields[3] = .{ .name = "reg_save_area", .ty = void_ptr };
+            record_ty.fields[0] = .{ .name = try comp.internString("gp_offset"), .ty = .{ .specifier = .uint } };
+            record_ty.fields[1] = .{ .name = try comp.internString("fp_offset"), .ty = .{ .specifier = .uint } };
+            record_ty.fields[2] = .{ .name = try comp.internString("overflow_arg_area"), .ty = void_ptr };
+            record_ty.fields[3] = .{ .name = try comp.internString("reg_save_area"), .ty = void_ptr };
             ty = .{ .specifier = .@"struct", .data = .{ .record = record_ty } };
         },
     }

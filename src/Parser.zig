@@ -733,7 +733,7 @@ fn decl(p: *Parser) Error!bool {
     var init_d = (try p.initDeclarator(&decl_spec, attr_buf_top)) orelse {
         _ = try p.expectToken(.semicolon);
         if (decl_spec.ty.is(.@"enum") or
-            (decl_spec.ty.isRecord() and !decl_spec.ty.isAnonymousRecord() and
+            (decl_spec.ty.isRecord() and !p.comp.isAnonymousRecord(decl_spec.ty, p.pp.tokens.items(.loc)) and
             !decl_spec.ty.isTypeof())) // we follow GCC and clang's behavior here
         {
             const specifier = decl_spec.ty.canonicalize(.standard).specifier;
@@ -827,21 +827,21 @@ fn decl(p: *Parser) Error!bool {
 
                     // find and correct parameter types
                     // TODO check for missing declarations and redefinitions
-                    const name_str = p.tokSlice(d.name);
+                    const interned_name = try p.comp.intern(d.name, p.pp.tokens.items(.loc));
                     for (init_d.d.ty.params()) |*param| {
-                        if (mem.eql(u8, param.name, name_str)) {
+                        if (param.name == interned_name) {
                             param.ty = d.ty;
                             break;
                         }
                     } else {
-                        try p.errStr(.parameter_missing, d.name, name_str);
+                        try p.errStr(.parameter_missing, d.name, p.tokSlice(d.name));
                     }
                     d.ty = try Attribute.applyParameterAttributes(p, d.ty, attr_buf_top_declarator, .alignas_on_param);
 
                     // bypass redefinition check to avoid duplicate errors
                     try p.syms.syms.append(p.gpa, .{
                         .kind = .def,
-                        .name = name_str,
+                        .name = p.tokSlice(d.name), //todo fixme
                         .tok = d.name,
                         .ty = d.ty,
                         .val = .{},
@@ -855,7 +855,7 @@ fn decl(p: *Parser) Error!bool {
                 if (param.ty.hasUnboundVLA()) try p.errTok(.unbound_vla, param.name_tok);
                 if (param.ty.hasIncompleteSize() and !param.ty.is(.void)) try p.errStr(.parameter_incomplete_ty, param.name_tok, try p.typeStr(param.ty));
 
-                if (param.name.len == 0) {
+                if (param.name == .empty) {
                     try p.errTok(.omitting_parameter_name, param.name_tok);
                     continue;
                 }
@@ -863,7 +863,7 @@ fn decl(p: *Parser) Error!bool {
                 // bypass redefinition check to avoid duplicate errors
                 try p.syms.syms.append(p.gpa, .{
                     .kind = .def,
-                    .name = param.name,
+                    .name = p.comp.getString(param.name, p.pp.tokens.items(.loc)), // todo interned string
                     .tok = param.name_tok,
                     .ty = param.ty,
                     .val = .{},
@@ -1587,6 +1587,11 @@ fn typeSpec(p: *Parser, ty: *Type.Builder) Error!bool {
     return p.tok_i != start;
 }
 
+fn getInternedAnonymousName(p: *Parser, kind_tok: TokenIndex) !Compilation.StringId {
+    const name = try p.getAnonymousName(kind_tok);
+    return p.comp.internString(name);
+}
+
 fn getAnonymousName(p: *Parser, kind_tok: TokenIndex) ![]const u8 {
     const loc = p.pp.tokens.items(.loc)[kind_tok];
     const source = p.comp.getSource(loc.id);
@@ -1626,14 +1631,15 @@ fn recordSpec(p: *Parser) Error!Type {
             return prev.ty;
         } else {
             // this is a forward declaration, create a new record Type.
-            const record_ty = try Type.Record.create(p.arena, p.tokSlice(ident));
+            const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
+            const record_ty = try Type.Record.create(p.arena, interned_name);
             const ty = try Attribute.applyTypeAttributes(p, .{
                 .specifier = if (is_struct) .@"struct" else .@"union",
                 .data = .{ .record = record_ty },
             }, attr_buf_top, null);
             try p.syms.syms.append(p.gpa, .{
                 .kind = if (is_struct) .@"struct" else .@"union",
-                .name = record_ty.name,
+                .name = p.tokSlice(ident), //TODO FIXME record_ty.name,
                 .tok = ident,
                 .ty = ty,
                 .val = .{},
@@ -1663,8 +1669,9 @@ fn recordSpec(p: *Parser) Error!Type {
                 break :record_ty prev.ty.get(if (is_struct) .@"struct" else .@"union").?.data.record;
             }
         }
-        break :record_ty try Type.Record.create(p.arena, p.tokSlice(ident));
-    } else try Type.Record.create(p.arena, try p.getAnonymousName(kind_tok));
+        const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
+        break :record_ty try Type.Record.create(p.arena, interned_name);
+    } else try Type.Record.create(p.arena, try p.getInternedAnonymousName(kind_tok));
 
     // Initially create ty as a regular non-attributed type, since attributes for a record
     // can be specified after the closing rbrace, which we haven't encountered yet.
@@ -1864,10 +1871,10 @@ fn recordDeclarator(p: *Parser) Error!bool {
 
         if (name_tok == 0 and bits_node == .none) unnamed: {
             if (ty.is(.@"enum") or ty.hasIncompleteSize()) break :unnamed;
-            if (ty.isAnonymousRecord()) {
+            if (p.comp.isAnonymousRecord(ty, p.pp.tokens.items(.loc))) {
                 // An anonymous record appears as indirect fields on the parent
                 try p.record_buf.append(.{
-                    .name = try p.getAnonymousName(first_tok),
+                    .name = try p.getInternedAnonymousName(first_tok),
                     .ty = ty,
                     .bit_width = 0,
                 });
@@ -1883,7 +1890,7 @@ fn recordDeclarator(p: *Parser) Error!bool {
             try p.err(.missing_declaration);
         } else {
             try p.record_buf.append(.{
-                .name = if (name_tok != 0) p.tokSlice(name_tok) else try p.getAnonymousName(first_tok),
+                .name = if (name_tok != 0) try p.comp.intern(name_tok, p.pp.tokens.items(.loc)) else try p.getInternedAnonymousName(first_tok),
                 .ty = ty,
                 .name_tok = name_tok,
                 .bit_width = bits,
@@ -1967,14 +1974,15 @@ fn enumSpec(p: *Parser) Error!Type {
             return prev.ty;
         } else {
             // this is a forward declaration, create a new enum Type.
-            const enum_ty = try Type.Enum.create(p.arena, p.tokSlice(ident), fixed_ty);
+            const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
+            const enum_ty = try Type.Enum.create(p.arena, interned_name, fixed_ty);
             const ty = try Attribute.applyTypeAttributes(p, .{
                 .specifier = .@"enum",
                 .data = .{ .@"enum" = enum_ty },
             }, attr_buf_top, null);
             try p.syms.syms.append(p.gpa, .{
                 .kind = .@"enum",
-                .name = enum_ty.name,
+                .name = p.tokSlice(ident),
                 .tok = ident,
                 .ty = ty,
                 .val = .{},
@@ -1994,6 +2002,7 @@ fn enumSpec(p: *Parser) Error!Type {
     // Get forward declared type or create a new one
     var defined = false;
     const enum_ty: *Type.Enum = if (maybe_ident) |ident| enum_ty: {
+        const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
         if (try p.syms.defineTag(p, .keyword_enum, ident)) |prev| {
             const enum_ty = prev.ty.get(.@"enum").?.data.@"enum";
             if (!enum_ty.isIncomplete() and !enum_ty.fixed) {
@@ -2006,8 +2015,8 @@ fn enumSpec(p: *Parser) Error!Type {
                 break :enum_ty enum_ty;
             }
         }
-        break :enum_ty try Type.Enum.create(p.arena, p.tokSlice(ident), fixed_ty);
-    } else try Type.Enum.create(p.arena, try p.getAnonymousName(enum_tok), fixed_ty);
+        break :enum_ty try Type.Enum.create(p.arena, interned_name, fixed_ty);
+    } else try Type.Enum.create(p.arena, try p.getInternedAnonymousName(enum_tok), fixed_ty);
 
     // reserve space for this enum
     try p.decl_buf.append(.none);
@@ -2284,6 +2293,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         }
     }
 
+    const interned_name = try p.comp.intern(name_tok, p.pp.tokens.items(.loc));
     try p.syms.defineEnumeration(p, res.ty, name_tok, e.res.val);
     const node = try p.addNode(.{
         .tag = .enum_field_decl,
@@ -2294,7 +2304,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         } },
     });
     return EnumFieldAndNode{ .field = .{
-        .name = p.tokSlice(name_tok),
+        .name = interned_name,
         .ty = res.ty,
         .name_tok = name_tok,
         .node = res.node,
@@ -2548,9 +2558,10 @@ fn directDeclarator(p: *Parser, base_type: Type, d: *Declarator, kind: Declarato
             specifier = .old_style_func;
             while (true) {
                 const name_tok = try p.expectIdentifier();
+                const interned_name = try p.comp.intern(name_tok, p.pp.tokens.items(.loc));
                 try p.syms.defineParam(p, undefined, name_tok);
                 try p.param_buf.append(.{
-                    .name = p.tokSlice(name_tok),
+                    .name = interned_name,
                     .name_tok = name_tok,
                     .ty = .{ .specifier = .int },
                 });
@@ -2653,7 +2664,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Func.Param {
 
         try param_decl_spec.validateParam(p, &param_ty);
         try p.param_buf.append(.{
-            .name = if (name_tok == 0) "" else p.tokSlice(name_tok),
+            .name = if (name_tok == 0) .empty else try p.comp.intern(name_tok, p.pp.tokens.items(.loc)),
             .name_tok = if (name_tok == 0) first_tok else name_tok,
             .ty = param_ty,
         });
@@ -2779,13 +2790,14 @@ fn initializerItem(p: *Parser, il: *InitList, init_ty: Type) Error!bool {
                 cur_ty = cur_ty.elemType();
                 designation = true;
             } else if (p.eatToken(.period)) |period| {
-                const field_name = p.tokSlice(try p.expectIdentifier());
+                const field_tok = try p.expectIdentifier();
+                const field_name = try p.comp.intern(field_tok, p.pp.tokens.items(.loc));
                 cur_ty = cur_ty.canonicalize(.standard);
                 if (!cur_ty.isRecord()) {
                     try p.errStr(.invalid_field_designator, period, try p.typeStr(cur_ty));
                     return error.ParsingFailed;
                 } else if (!cur_ty.hasField(field_name)) {
-                    try p.errStr(.no_such_field_designator, period, field_name);
+                    try p.errStr(.no_such_field_designator, period, p.tokSlice(field_tok));
                     return error.ParsingFailed;
                 }
 
@@ -2800,7 +2812,7 @@ fn initializerItem(p: *Parser, il: *InitList, init_ty: Type) Error!bool {
                             cur_index_hint = cur_index_hint orelse i;
                             continue :outer;
                         }
-                        if (std.mem.eql(u8, field_name, f.name)) {
+                        if (field_name == f.name) {
                             cur_il = try cur_il.find(p.gpa, i);
                             cur_ty = f.ty;
                             cur_index_hint = cur_index_hint orelse i;
@@ -5514,7 +5526,8 @@ fn builtinOffsetof(p: *Parser) Error!Result {
 fn offsetofMemberDesignator(p: *Parser, base_ty: Type) Error!Result {
     errdefer p.skipTo(.r_paren);
     const base_field_name_tok = try p.expectIdentifier();
-    const base_field_name = p.tokSlice(base_field_name_tok);
+    const locs = p.pp.tokens.items(.loc);
+    const base_field_name = try p.comp.intern(base_field_name_tok, locs);
     try p.validateFieldAccess(base_ty, base_ty, base_field_name_tok, base_field_name);
     const base_node = try p.addNode(.{ .tag = .default_init_expr, .ty = base_ty, .data = undefined });
 
@@ -5525,7 +5538,7 @@ fn offsetofMemberDesignator(p: *Parser, base_ty: Type) Error!Result {
         .period => {
             p.tok_i += 1;
             const field_name_tok = try p.expectIdentifier();
-            const field_name = p.tokSlice(field_name_tok);
+            const field_name = try p.comp.intern(field_name_tok, locs);
 
             if (!lhs.ty.isRecord()) {
                 try p.errStr(.offsetof_ty, field_name_tok, try p.typeStr(lhs.ty));
@@ -5981,17 +5994,17 @@ fn fieldAccess(
     if (is_arrow and !is_ptr) try p.errStr(.member_expr_not_ptr, field_name_tok, try p.typeStr(expr_ty));
     if (!is_arrow and is_ptr) try p.errStr(.member_expr_ptr, field_name_tok, try p.typeStr(expr_ty));
 
-    const field_name = p.tokSlice(field_name_tok);
+    const field_name = try p.comp.intern(field_name_tok, p.pp.tokens.items(.loc));
     try p.validateFieldAccess(record_ty, expr_ty, field_name_tok, field_name);
     return p.fieldAccessExtra(lhs.node, record_ty, field_name, is_arrow);
 }
 
-fn validateFieldAccess(p: *Parser, record_ty: Type, expr_ty: Type, field_name_tok: TokenIndex, field_name: []const u8) Error!void {
+fn validateFieldAccess(p: *Parser, record_ty: Type, expr_ty: Type, field_name_tok: TokenIndex, field_name: Compilation.StringId) Error!void {
     if (record_ty.hasField(field_name)) return;
 
     p.strings.items.len = 0;
 
-    try p.strings.writer().print("'{s}' in '", .{field_name});
+    try p.strings.writer().print("'{s}' in '", .{p.tokSlice(field_name_tok)});
     try expr_ty.print(p.strings.writer());
     try p.strings.append('\'');
 
@@ -6000,7 +6013,7 @@ fn validateFieldAccess(p: *Parser, record_ty: Type, expr_ty: Type, field_name_to
     return error.ParsingFailed;
 }
 
-fn fieldAccessExtra(p: *Parser, lhs: NodeIndex, record_ty: Type, field_name: []const u8, is_arrow: bool) Error!Result {
+fn fieldAccessExtra(p: *Parser, lhs: NodeIndex, record_ty: Type, field_name: Compilation.StringId, is_arrow: bool) Error!Result {
     for (record_ty.data.record.fields) |f, i| {
         if (f.isAnonymousRecord()) {
             if (!f.ty.hasField(field_name)) continue;
@@ -6011,7 +6024,7 @@ fn fieldAccessExtra(p: *Parser, lhs: NodeIndex, record_ty: Type, field_name: []c
             });
             return p.fieldAccessExtra(inner, f.ty, field_name, false);
         }
-        if (std.mem.eql(u8, field_name, f.name)) return Result{
+        if (field_name == f.name) return Result{
             .ty = f.ty,
             .node = try p.addNode(.{
                 .tag = if (is_arrow) .member_access_ptr_expr else .member_access_expr,
@@ -6080,8 +6093,7 @@ fn callExpr(p: *Parser, lhs: Result) Error!Result {
             }
             const last_param_name = func_params[func_params.len - 1].name;
             const decl_ref = p.getNode(raw_arg_node, .decl_ref_expr);
-            if (decl_ref == null or
-                !mem.eql(u8, p.tokSlice(p.nodes.items(.data)[@enumToInt(decl_ref.?)].decl_ref), last_param_name))
+            if (decl_ref == null or last_param_name == try p.comp.intern(p.nodes.items(.data)[@enumToInt(decl_ref.?)].decl_ref, p.pp.tokens.items(.loc)))
             {
                 try p.errTok(.va_start_not_last_param, param_tok);
             }

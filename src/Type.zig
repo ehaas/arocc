@@ -97,7 +97,7 @@ pub const Func = struct {
     params: []Param,
 
     pub const Param = struct {
-        name: []const u8,
+        name: Compilation.StringId,
         ty: Type,
         name_tok: TokenIndex,
     };
@@ -135,13 +135,13 @@ pub const Attributed = struct {
 
 // TODO improve memory usage
 pub const Enum = struct {
-    name: []const u8,
+    name: Compilation.StringId,
     tag_ty: Type,
     fields: []Field,
     fixed: bool,
 
     pub const Field = struct {
-        name: []const u8,
+        name: Compilation.StringId,
         ty: Type,
         name_tok: TokenIndex,
         node: NodeIndex,
@@ -151,7 +151,7 @@ pub const Enum = struct {
         return e.fields.len == std.math.maxInt(usize);
     }
 
-    pub fn create(allocator: std.mem.Allocator, name: []const u8, fixed_ty: ?Type) !*Enum {
+    pub fn create(allocator: std.mem.Allocator, name: Compilation.StringId, fixed_ty: ?Type) !*Enum {
         var e = try allocator.create(Enum);
         e.name = name;
         e.fields.len = std.math.maxInt(usize);
@@ -163,7 +163,7 @@ pub const Enum = struct {
 
 // TODO improve memory usage
 pub const Record = struct {
-    name: []const u8,
+    name: Compilation.StringId,
     fields: []Field,
     size: u64,
     alignment: u29,
@@ -174,7 +174,7 @@ pub const Record = struct {
     field_attributes: ?[*][]const Attribute,
 
     pub const Field = struct {
-        name: []const u8,
+        name: Compilation.StringId,
         ty: Type,
         /// zero for anonymous fields
         name_tok: TokenIndex = 0,
@@ -189,7 +189,7 @@ pub const Record = struct {
         return r.fields.len == std.math.maxInt(usize);
     }
 
-    pub fn create(allocator: std.mem.Allocator, name: []const u8) !*Record {
+    pub fn create(allocator: std.mem.Allocator, name: Compilation.StringId) !*Record {
         var r = try allocator.create(Record);
         r.name = name;
         r.fields.len = std.math.maxInt(usize);
@@ -478,18 +478,6 @@ pub fn isRecord(ty: Type) bool {
     };
 }
 
-pub fn isAnonymousRecord(ty: Type) bool {
-    return switch (ty.specifier) {
-        // anonymous records can be recognized by their names which are in
-        // the format "(anonymous TAG at path:line:col)".
-        .@"struct", .@"union" => ty.data.record.name[0] == '(',
-        .typeof_type => ty.data.sub_type.isAnonymousRecord(),
-        .typeof_expr => ty.data.expr.ty.isAnonymousRecord(),
-        .attributed => ty.data.attributed.base.isAnonymousRecord(),
-        else => false,
-    };
-}
-
 pub fn elemType(ty: Type) Type {
     return switch (ty.specifier) {
         .pointer, .unspecified_variable_len_array, .decayed_unspecified_variable_len_array => ty.data.sub_type.*,
@@ -624,20 +612,20 @@ pub fn hasUnboundVLA(ty: Type) bool {
     }
 }
 
-pub fn hasField(ty: Type, name: []const u8) bool {
+pub fn hasField(ty: Type, name: Compilation.StringId) bool {
     switch (ty.specifier) {
         .@"struct" => {
             std.debug.assert(!ty.data.record.isIncomplete());
             for (ty.data.record.fields) |f| {
                 if (f.isAnonymousRecord() and f.ty.hasField(name)) return true;
-                if (std.mem.eql(u8, name, f.name)) return true;
+                if (name == f.name) return true;
             }
         },
         .@"union" => {
             std.debug.assert(!ty.data.record.isIncomplete());
             for (ty.data.record.fields) |f| {
                 if (f.isAnonymousRecord() and f.ty.hasField(name)) return true;
-                if (std.mem.eql(u8, name, f.name)) return true;
+                if (name == f.name) return true;
             }
         },
         .typeof_type => return ty.data.sub_type.hasField(name),
@@ -1964,13 +1952,13 @@ fn printPrologue(ty: Type, w: anytype) @TypeOf(w).Error!bool {
 
     switch (ty.specifier) {
         .@"enum" => if (ty.data.@"enum".fixed) {
-            try w.print("enum {s}: ", .{ty.data.@"enum".name});
+            try w.print("enum {d}: ", .{ty.data.@"enum".name}); // qqq
             try ty.data.@"enum".tag_ty.dump(w);
         } else {
-            try w.print("enum {s}", .{ty.data.@"enum".name});
+            try w.print("enum {d}", .{ty.data.@"enum".name}); // qqq
         },
-        .@"struct" => try w.print("struct {s}", .{ty.data.record.name}),
-        .@"union" => try w.print("union {s}", .{ty.data.record.name}),
+        .@"struct" => try w.print("struct {d}", .{ty.data.record.name}), // qqqq
+        .@"union" => try w.print("union {d}", .{ty.data.record.name}), // qqqqq
         .vector => {
             const len = ty.data.array.len;
             const elem_ty = ty.data.array.elem;
@@ -2071,7 +2059,7 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
             try w.writeAll("fn (");
             for (ty.data.func.params) |param, i| {
                 if (i != 0) try w.writeAll(", ");
-                if (param.name.len != 0) try w.print("{s}: ", .{param.name});
+                if (param.name != .empty) try w.print("{d}: ", .{param.name}); // todo: strin
                 try param.ty.dump(w);
             }
             if (ty.specifier != .func) {
@@ -2101,19 +2089,19 @@ pub fn dump(ty: Type, w: anytype) @TypeOf(w).Error!void {
         .@"enum" => {
             const enum_ty = ty.data.@"enum";
             if (enum_ty.isIncomplete() and !enum_ty.fixed) {
-                try w.print("enum {s}", .{enum_ty.name});
+                try w.print("enum {d}", .{enum_ty.name});
             } else {
-                try w.print("enum {s}: ", .{enum_ty.name});
+                try w.print("enum {d}: ", .{enum_ty.name});
                 try enum_ty.tag_ty.dump(w);
             }
             if (dump_detailed_containers) try dumpEnum(enum_ty, w);
         },
         .@"struct" => {
-            try w.print("struct {s}", .{ty.data.record.name});
+            try w.print("struct {d}", .{ty.data.record.name}); // qqqq
             if (dump_detailed_containers) try dumpRecord(ty.data.record, w);
         },
         .@"union" => {
-            try w.print("union {s}", .{ty.data.record.name});
+            try w.print("union {d}", .{ty.data.record.name}); // qqq
             if (dump_detailed_containers) try dumpRecord(ty.data.record, w);
         },
         .unspecified_variable_len_array, .decayed_unspecified_variable_len_array => {
