@@ -536,18 +536,18 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!Tree {
     _ = try p.addNode(.{ .tag = .invalid, .ty = undefined, .data = undefined });
 
     {
-        try p.syms.defineTypedef(&p, "__int128_t", .{ .specifier = .int128 }, 0, .none);
-        try p.syms.defineTypedef(&p, "__uint128_t", .{ .specifier = .uint128 }, 0, .none);
+        try p.syms.defineTypedef(&p, try p.comp.internString("__int128_t"), .{ .specifier = .int128 }, 0, .none);
+        try p.syms.defineTypedef(&p, try p.comp.internString("__uint128_t"), .{ .specifier = .uint128 }, 0, .none);
 
         const elem_ty = try p.arena.create(Type);
         elem_ty.* = .{ .specifier = .char };
-        try p.syms.defineTypedef(&p, "__builtin_ms_va_list", .{
+        try p.syms.defineTypedef(&p, try p.comp.internString("__builtin_ms_va_list"), .{
             .specifier = .pointer,
             .data = .{ .sub_type = elem_ty },
         }, 0, .none);
 
         const ty = &pp.comp.types.va_list;
-        try p.syms.defineTypedef(&p, "__builtin_va_list", ty.*, 0, .none);
+        try p.syms.defineTypedef(&p, try p.comp.internString("__builtin_va_list"), ty.*, 0, .none);
 
         if (ty.isArray()) ty.decayArray();
     }
@@ -769,7 +769,8 @@ fn decl(p: *Parser) Error!bool {
         if (p.func.ty != null) try p.err(.func_not_in_root);
 
         const node = try p.addNode(undefined); // reserve space
-        try p.syms.defineSymbol(p, init_d.d.ty, init_d.d.name, node, .{});
+        const interned_declarator_name = try p.comp.intern(init_d.d.name, p.pp.tokens.items(.loc));
+        try p.syms.defineSymbol(p, interned_declarator_name, init_d.d.ty, init_d.d.name, node, .{});
 
         const func = p.func;
         p.func = .{
@@ -841,7 +842,7 @@ fn decl(p: *Parser) Error!bool {
                     // bypass redefinition check to avoid duplicate errors
                     try p.syms.syms.append(p.gpa, .{
                         .kind = .def,
-                        .name = p.tokSlice(d.name), //todo fixme
+                        .name = interned_name,
                         .tok = d.name,
                         .ty = d.ty,
                         .val = .{},
@@ -863,7 +864,7 @@ fn decl(p: *Parser) Error!bool {
                 // bypass redefinition check to avoid duplicate errors
                 try p.syms.syms.append(p.gpa, .{
                     .kind = .def,
-                    .name = p.comp.getString(param.name, p.pp.tokens.items(.loc)), // todo interned string
+                    .name = param.name, // todo interned string
                     .tok = param.name_tok,
                     .ty = param.ty,
                     .val = .{},
@@ -910,20 +911,22 @@ fn decl(p: *Parser) Error!bool {
         } });
         try p.decl_buf.append(node);
 
+        const interned_name = try p.comp.intern(init_d.d.name, p.pp.tokens.items(.loc));
         if (decl_spec.storage_class == .typedef) {
-            try p.syms.defineTypedef(p, p.tokSlice(init_d.d.name), init_d.d.ty, init_d.d.name, node);
+            try p.syms.defineTypedef(p, interned_name, init_d.d.ty, init_d.d.name, node);
         } else if (init_d.initializer.node != .none or
             (p.func.ty != null and decl_spec.storage_class != .@"extern"))
         {
             try p.syms.defineSymbol(
                 p,
+                interned_name,
                 init_d.d.ty,
                 init_d.d.name,
                 node,
                 if (init_d.d.ty.isConst()) init_d.initializer.val else .{},
             );
         } else {
-            try p.syms.declareSymbol(p, init_d.d.ty, init_d.d.name, node);
+            try p.syms.declareSymbol(p, interned_name, init_d.d.ty, init_d.d.name, node);
         }
 
         if (p.eatToken(.comma) == null) break;
@@ -1412,7 +1415,8 @@ fn initDeclarator(p: *Parser, decl_spec: *DeclSpec, attr_buf_top: usize) Error!?
         try p.syms.pushScope(p);
         defer p.syms.popScope();
 
-        try p.syms.declareSymbol(p, init_d.d.ty, init_d.d.name, .none);
+        const interned_name = try p.comp.intern(init_d.d.name, p.pp.tokens.items(.loc));
+        try p.syms.declareSymbol(p, interned_name, init_d.d.ty, init_d.d.name, .none);
         var init_list_expr = try p.initializer(init_d.d.ty);
         init_d.initializer = init_list_expr;
         if (!init_list_expr.ty.isArray()) break :init;
@@ -1576,7 +1580,8 @@ fn typeSpec(p: *Parser, ty: *Type.Builder) Error!bool {
                     }
                 }
                 if (ty.typedef != null) break;
-                const typedef = (try p.syms.findTypedef(p, p.tok_i, ty.specifier != .none)) orelse break;
+                const interned_name = try p.comp.intern(p.tok_i, p.pp.tokens.items(.loc));
+                const typedef = (try p.syms.findTypedef(p, interned_name, p.tok_i, ty.specifier != .none)) orelse break;
                 if (!ty.combineTypedef(p, typedef.ty, typedef.tok)) break;
             },
             else => break,
@@ -1627,11 +1632,11 @@ fn recordSpec(p: *Parser) Error!Type {
             return error.ParsingFailed;
         };
         // check if this is a reference to a previous type
-        if (try p.syms.findTag(p, p.tok_ids[kind_tok], ident, p.tok_ids[p.tok_i])) |prev| {
+        const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
+        if (try p.syms.findTag(p, interned_name, p.tok_ids[kind_tok], ident, p.tok_ids[p.tok_i])) |prev| {
             return prev.ty;
         } else {
             // this is a forward declaration, create a new record Type.
-            const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
             const record_ty = try Type.Record.create(p.arena, interned_name);
             const ty = try Attribute.applyTypeAttributes(p, .{
                 .specifier = if (is_struct) .@"struct" else .@"union",
@@ -1639,7 +1644,7 @@ fn recordSpec(p: *Parser) Error!Type {
             }, attr_buf_top, null);
             try p.syms.syms.append(p.gpa, .{
                 .kind = if (is_struct) .@"struct" else .@"union",
-                .name = p.tokSlice(ident), //TODO FIXME record_ty.name,
+                .name = interned_name,
                 .tok = ident,
                 .ty = ty,
                 .val = .{},
@@ -1659,7 +1664,8 @@ fn recordSpec(p: *Parser) Error!Type {
     // Get forward declared type or create a new one
     var defined = false;
     const record_ty: *Type.Record = if (maybe_ident) |ident| record_ty: {
-        if (try p.syms.defineTag(p, p.tok_ids[kind_tok], ident)) |prev| {
+        const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
+        if (try p.syms.defineTag(p, interned_name, p.tok_ids[kind_tok], ident)) |prev| {
             if (!prev.ty.hasIncompleteSize()) {
                 // if the record isn't incomplete, this is a redefinition
                 try p.errStr(.redefinition, ident, p.tokSlice(ident));
@@ -1669,7 +1675,6 @@ fn recordSpec(p: *Parser) Error!Type {
                 break :record_ty prev.ty.get(if (is_struct) .@"struct" else .@"union").?.data.record;
             }
         }
-        const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
         break :record_ty try Type.Record.create(p.arena, interned_name);
     } else try Type.Record.create(p.arena, try p.getInternedAnonymousName(kind_tok));
 
@@ -1687,7 +1692,7 @@ fn recordSpec(p: *Parser) Error!Type {
         symbol_index = p.syms.syms.len;
         try p.syms.syms.append(p.gpa, .{
             .kind = if (is_struct) .@"struct" else .@"union",
-            .name = p.tokSlice(maybe_ident.?),
+            .name = record_ty.name,
             .tok = maybe_ident.?,
             .ty = ty,
             .val = .{},
@@ -1969,12 +1974,12 @@ fn enumSpec(p: *Parser) Error!Type {
             return error.ParsingFailed;
         };
         // check if this is a reference to a previous type
-        if (try p.syms.findTag(p, .keyword_enum, ident, p.tok_ids[p.tok_i])) |prev| {
+        const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
+        if (try p.syms.findTag(p, interned_name, .keyword_enum, ident, p.tok_ids[p.tok_i])) |prev| {
             try p.checkEnumFixedTy(fixed_ty, ident, prev);
             return prev.ty;
         } else {
             // this is a forward declaration, create a new enum Type.
-            const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
             const enum_ty = try Type.Enum.create(p.arena, interned_name, fixed_ty);
             const ty = try Attribute.applyTypeAttributes(p, .{
                 .specifier = .@"enum",
@@ -1982,7 +1987,7 @@ fn enumSpec(p: *Parser) Error!Type {
             }, attr_buf_top, null);
             try p.syms.syms.append(p.gpa, .{
                 .kind = .@"enum",
-                .name = p.tokSlice(ident),
+                .name = interned_name,
                 .tok = ident,
                 .ty = ty,
                 .val = .{},
@@ -2003,7 +2008,7 @@ fn enumSpec(p: *Parser) Error!Type {
     var defined = false;
     const enum_ty: *Type.Enum = if (maybe_ident) |ident| enum_ty: {
         const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
-        if (try p.syms.defineTag(p, .keyword_enum, ident)) |prev| {
+        if (try p.syms.defineTag(p, interned_name, .keyword_enum, ident)) |prev| {
             const enum_ty = prev.ty.get(.@"enum").?.data.@"enum";
             if (!enum_ty.isIncomplete() and !enum_ty.fixed) {
                 // if the enum isn't incomplete, this is a redefinition
@@ -2093,7 +2098,7 @@ fn enumSpec(p: *Parser) Error!Type {
     if (maybe_ident != null and !defined) {
         try p.syms.syms.append(p.gpa, .{
             .kind = .@"enum",
-            .name = p.tokSlice(maybe_ident.?),
+            .name = enum_ty.name,
             .ty = ty,
             .tok = maybe_ident.?,
             .val = .{},
@@ -2294,7 +2299,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     }
 
     const interned_name = try p.comp.intern(name_tok, p.pp.tokens.items(.loc));
-    try p.syms.defineEnumeration(p, res.ty, name_tok, e.res.val);
+    try p.syms.defineEnumeration(p, interned_name, res.ty, name_tok, e.res.val);
     const node = try p.addNode(.{
         .tag = .enum_field_decl,
         .ty = res.ty,
@@ -2559,7 +2564,7 @@ fn directDeclarator(p: *Parser, base_type: Type, d: *Declarator, kind: Declarato
             while (true) {
                 const name_tok = try p.expectIdentifier();
                 const interned_name = try p.comp.intern(name_tok, p.pp.tokens.items(.loc));
-                try p.syms.defineParam(p, undefined, name_tok);
+                try p.syms.defineParam(p, interned_name, undefined, name_tok);
                 try p.param_buf.append(.{
                     .name = interned_name,
                     .name_tok = name_tok,
@@ -2632,7 +2637,8 @@ fn paramDecls(p: *Parser) Error!?[]Type.Func.Param {
             name_tok = some.name;
             param_ty = some.ty;
             if (some.name != 0) {
-                try p.syms.defineParam(p, param_ty, name_tok);
+                const interned_name = try p.comp.intern(name_tok, p.pp.tokens.items(.loc));
+                try p.syms.defineParam(p, interned_name, param_ty, name_tok);
             }
         }
         param_ty = try Attribute.applyParameterAttributes(p, param_ty, attr_buf_top, .alignas_on_param);
@@ -6198,6 +6204,7 @@ fn primaryExpr(p: *Parser) Error!Result {
         .identifier, .extended_identifier => {
             const name_tok = p.expectIdentifier() catch unreachable;
             const name = p.tokSlice(name_tok);
+            const interned_name = try p.comp.intern(name_tok, p.pp.tokens.items(.loc));
             if (p.comp.builtins.get(name)) |some| {
                 for (p.tok_ids[p.tok_i..]) |id| switch (id) {
                     .r_paren => {}, // closing grouped expr
@@ -6216,7 +6223,7 @@ fn primaryExpr(p: *Parser) Error!Result {
                     }),
                 };
             }
-            if (p.syms.findSymbol(p, name_tok)) |sym| {
+            if (p.syms.findSymbol(interned_name)) |sym| {
                 try p.checkDeprecatedUnavailable(sym.ty, name_tok, sym.tok);
                 if (sym.val.tag == .int) {
                     switch (p.const_decl_folding) {
@@ -6252,7 +6259,7 @@ fn primaryExpr(p: *Parser) Error!Result {
                 });
 
                 try p.decl_buf.append(node);
-                try p.syms.declareSymbol(p, ty, name_tok, node);
+                try p.syms.declareSymbol(p, interned_name, ty, name_tok, node);
 
                 return Result{
                     .ty = ty,
