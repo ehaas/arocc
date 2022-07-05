@@ -85,6 +85,7 @@ pp: *Preprocessor,
 comp: *Compilation,
 gpa: mem.Allocator,
 tok_ids: []const Token.Id,
+locs: []const Source.Location,
 tok_i: TokenIndex = 0,
 
 // values of the incomplete Tree
@@ -198,7 +199,7 @@ fn eatIdentifier(p: *Parser) !?TokenIndex {
         .extended_identifier => {
             const slice = p.tokSlice(p.tok_i);
             var it = std.unicode.Utf8View.initUnchecked(slice).iterator();
-            var loc = p.pp.tokens.items(.loc)[p.tok_i];
+            var loc = p.locs[p.tok_i];
 
             if (mem.indexOfScalar(u8, slice, '$')) |i| {
                 loc.byte_offset += @intCast(u32, i);
@@ -206,7 +207,7 @@ fn eatIdentifier(p: *Parser) !?TokenIndex {
                     .tag = .dollar_in_identifier_extension,
                     .loc = loc,
                 }, &.{});
-                loc = p.pp.tokens.items(.loc)[p.tok_i];
+                loc = p.locs[p.tok_i];
             }
 
             while (it.nextCodepoint()) |c| {
@@ -256,7 +257,7 @@ fn expectToken(p: *Parser, expected: Token.Id) Error!TokenIndex {
 }
 
 pub fn tokSlice(p: *Parser, tok: TokenIndex) []const u8 {
-    return p.comp.locSlice(p.pp.tokens.items(.loc)[tok]);
+    return p.comp.locSlice(p.locs[tok]);
 }
 
 fn expectClosing(p: *Parser, opening: TokenIndex, id: Token.Id) Error!void {
@@ -500,6 +501,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!Tree {
         .gpa = pp.comp.gpa,
         .arena = arena.allocator(),
         .tok_ids = pp.tokens.items(.id),
+        .locs = pp.tokens.items(.loc),
         .strings = std.ArrayList(u8).init(pp.comp.gpa),
         .value_map = Tree.ValueMap.init(pp.comp.gpa),
         .data = NodeList.init(pp.comp.gpa),
@@ -733,7 +735,7 @@ fn decl(p: *Parser) Error!bool {
     var init_d = (try p.initDeclarator(&decl_spec, attr_buf_top)) orelse {
         _ = try p.expectToken(.semicolon);
         if (decl_spec.ty.is(.@"enum") or
-            (decl_spec.ty.isRecord() and !p.comp.isAnonymousRecord(decl_spec.ty, p.pp.tokens.items(.loc)) and
+            (decl_spec.ty.isRecord() and !p.comp.isAnonymousRecord(decl_spec.ty, p.locs) and
             !decl_spec.ty.isTypeof())) // we follow GCC and clang's behavior here
         {
             const specifier = decl_spec.ty.canonicalize(.standard).specifier;
@@ -769,7 +771,7 @@ fn decl(p: *Parser) Error!bool {
         if (p.func.ty != null) try p.err(.func_not_in_root);
 
         const node = try p.addNode(undefined); // reserve space
-        const interned_declarator_name = try p.comp.intern(init_d.d.name, p.pp.tokens.items(.loc));
+        const interned_declarator_name = try p.comp.intern(init_d.d.name, p.locs);
         try p.syms.defineSymbol(p, interned_declarator_name, init_d.d.ty, init_d.d.name, node, .{});
 
         const func = p.func;
@@ -828,7 +830,7 @@ fn decl(p: *Parser) Error!bool {
 
                     // find and correct parameter types
                     // TODO check for missing declarations and redefinitions
-                    const interned_name = try p.comp.intern(d.name, p.pp.tokens.items(.loc));
+                    const interned_name = try p.comp.intern(d.name, p.locs);
                     for (init_d.d.ty.params()) |*param| {
                         if (param.name == interned_name) {
                             param.ty = d.ty;
@@ -911,7 +913,7 @@ fn decl(p: *Parser) Error!bool {
         } });
         try p.decl_buf.append(node);
 
-        const interned_name = try p.comp.intern(init_d.d.name, p.pp.tokens.items(.loc));
+        const interned_name = try p.comp.intern(init_d.d.name, p.locs);
         if (decl_spec.storage_class == .typedef) {
             try p.syms.defineTypedef(p, interned_name, init_d.d.ty, init_d.d.name, node);
         } else if (init_d.initializer.node != .none or
@@ -1415,7 +1417,7 @@ fn initDeclarator(p: *Parser, decl_spec: *DeclSpec, attr_buf_top: usize) Error!?
         try p.syms.pushScope(p);
         defer p.syms.popScope();
 
-        const interned_name = try p.comp.intern(init_d.d.name, p.pp.tokens.items(.loc));
+        const interned_name = try p.comp.intern(init_d.d.name, p.locs);
         try p.syms.declareSymbol(p, interned_name, init_d.d.ty, init_d.d.name, .none);
         var init_list_expr = try p.initializer(init_d.d.ty);
         init_d.initializer = init_list_expr;
@@ -1580,7 +1582,7 @@ fn typeSpec(p: *Parser, ty: *Type.Builder) Error!bool {
                     }
                 }
                 if (ty.typedef != null) break;
-                const interned_name = try p.comp.intern(p.tok_i, p.pp.tokens.items(.loc));
+                const interned_name = try p.comp.intern(p.tok_i, p.locs);
                 const typedef = (try p.syms.findTypedef(p, interned_name, p.tok_i, ty.specifier != .none)) orelse break;
                 if (!ty.combineTypedef(p, typedef.ty, typedef.tok)) break;
             },
@@ -1593,7 +1595,7 @@ fn typeSpec(p: *Parser, ty: *Type.Builder) Error!bool {
 }
 
 fn getAnonymousName(p: *Parser, kind_tok: TokenIndex) !Compilation.StringId {
-    const loc = p.pp.tokens.items(.loc)[kind_tok];
+    const loc = p.locs[kind_tok];
     const source = p.comp.getSource(loc.id);
     const line_col = source.lineCol(loc);
 
@@ -1630,7 +1632,7 @@ fn recordSpec(p: *Parser) Error!Type {
             return error.ParsingFailed;
         };
         // check if this is a reference to a previous type
-        const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
+        const interned_name = try p.comp.intern(ident, p.locs);
         if (try p.syms.findTag(p, interned_name, p.tok_ids[kind_tok], ident, p.tok_ids[p.tok_i])) |prev| {
             return prev.ty;
         } else {
@@ -1662,7 +1664,7 @@ fn recordSpec(p: *Parser) Error!Type {
     // Get forward declared type or create a new one
     var defined = false;
     const record_ty: *Type.Record = if (maybe_ident) |ident| record_ty: {
-        const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
+        const interned_name = try p.comp.intern(ident, p.locs);
         if (try p.syms.defineTag(p, interned_name, p.tok_ids[kind_tok], ident)) |prev| {
             if (!prev.ty.hasIncompleteSize()) {
                 // if the record isn't incomplete, this is a redefinition
@@ -1874,7 +1876,7 @@ fn recordDeclarator(p: *Parser) Error!bool {
 
         if (name_tok == 0 and bits_node == .none) unnamed: {
             if (ty.is(.@"enum") or ty.hasIncompleteSize()) break :unnamed;
-            if (p.comp.isAnonymousRecord(ty, p.pp.tokens.items(.loc))) {
+            if (p.comp.isAnonymousRecord(ty, p.locs)) {
                 // An anonymous record appears as indirect fields on the parent
                 try p.record_buf.append(.{
                     .name = try p.getAnonymousName(first_tok),
@@ -1893,7 +1895,7 @@ fn recordDeclarator(p: *Parser) Error!bool {
             try p.err(.missing_declaration);
         } else {
             try p.record_buf.append(.{
-                .name = if (name_tok != 0) try p.comp.intern(name_tok, p.pp.tokens.items(.loc)) else try p.getAnonymousName(first_tok),
+                .name = if (name_tok != 0) try p.comp.intern(name_tok, p.locs) else try p.getAnonymousName(first_tok),
                 .ty = ty,
                 .name_tok = name_tok,
                 .bit_width = bits,
@@ -1972,7 +1974,7 @@ fn enumSpec(p: *Parser) Error!Type {
             return error.ParsingFailed;
         };
         // check if this is a reference to a previous type
-        const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
+        const interned_name = try p.comp.intern(ident, p.locs);
         if (try p.syms.findTag(p, interned_name, .keyword_enum, ident, p.tok_ids[p.tok_i])) |prev| {
             try p.checkEnumFixedTy(fixed_ty, ident, prev);
             return prev.ty;
@@ -2005,7 +2007,7 @@ fn enumSpec(p: *Parser) Error!Type {
     // Get forward declared type or create a new one
     var defined = false;
     const enum_ty: *Type.Enum = if (maybe_ident) |ident| enum_ty: {
-        const interned_name = try p.comp.intern(ident, p.pp.tokens.items(.loc));
+        const interned_name = try p.comp.intern(ident, p.locs);
         if (try p.syms.defineTag(p, interned_name, .keyword_enum, ident)) |prev| {
             const enum_ty = prev.ty.get(.@"enum").?.data.@"enum";
             if (!enum_ty.isIncomplete() and !enum_ty.fixed) {
@@ -2296,7 +2298,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         }
     }
 
-    const interned_name = try p.comp.intern(name_tok, p.pp.tokens.items(.loc));
+    const interned_name = try p.comp.intern(name_tok, p.locs);
     try p.syms.defineEnumeration(p, interned_name, res.ty, name_tok, e.res.val);
     const node = try p.addNode(.{
         .tag = .enum_field_decl,
@@ -2561,7 +2563,7 @@ fn directDeclarator(p: *Parser, base_type: Type, d: *Declarator, kind: Declarato
             specifier = .old_style_func;
             while (true) {
                 const name_tok = try p.expectIdentifier();
-                const interned_name = try p.comp.intern(name_tok, p.pp.tokens.items(.loc));
+                const interned_name = try p.comp.intern(name_tok, p.locs);
                 try p.syms.defineParam(p, interned_name, undefined, name_tok);
                 try p.param_buf.append(.{
                     .name = interned_name,
@@ -2635,7 +2637,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Func.Param {
             name_tok = some.name;
             param_ty = some.ty;
             if (some.name != 0) {
-                const interned_name = try p.comp.intern(name_tok, p.pp.tokens.items(.loc));
+                const interned_name = try p.comp.intern(name_tok, p.locs);
                 try p.syms.defineParam(p, interned_name, param_ty, name_tok);
             }
         }
@@ -2668,7 +2670,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Func.Param {
 
         try param_decl_spec.validateParam(p, &param_ty);
         try p.param_buf.append(.{
-            .name = if (name_tok == 0) .empty else try p.comp.intern(name_tok, p.pp.tokens.items(.loc)),
+            .name = if (name_tok == 0) .empty else try p.comp.intern(name_tok, p.locs),
             .name_tok = if (name_tok == 0) first_tok else name_tok,
             .ty = param_ty,
         });
@@ -2795,7 +2797,7 @@ fn initializerItem(p: *Parser, il: *InitList, init_ty: Type) Error!bool {
                 designation = true;
             } else if (p.eatToken(.period)) |period| {
                 const field_tok = try p.expectIdentifier();
-                const field_name = try p.comp.intern(field_tok, p.pp.tokens.items(.loc));
+                const field_name = try p.comp.intern(field_tok, p.locs);
                 cur_ty = cur_ty.canonicalize(.standard);
                 if (!cur_ty.isRecord()) {
                     try p.errStr(.invalid_field_designator, period, try p.typeStr(cur_ty));
@@ -5342,7 +5344,7 @@ fn removeUnusedWarningForTok(p: *Parser, last_expr_tok: TokenIndex) void {
     if (last_expr_tok == 0) return;
     if (p.comp.diag.list.items.len == 0) return;
 
-    const last_expr_loc = p.pp.tokens.items(.loc)[last_expr_tok];
+    const last_expr_loc = p.locs[last_expr_tok];
     const last_msg = p.comp.diag.list.items[p.comp.diag.list.items.len - 1];
 
     if (last_msg.tag == .unused_value and last_msg.loc.eql(last_expr_loc)) {
@@ -5530,8 +5532,7 @@ fn builtinOffsetof(p: *Parser) Error!Result {
 fn offsetofMemberDesignator(p: *Parser, base_ty: Type) Error!Result {
     errdefer p.skipTo(.r_paren);
     const base_field_name_tok = try p.expectIdentifier();
-    const locs = p.pp.tokens.items(.loc);
-    const base_field_name = try p.comp.intern(base_field_name_tok, locs);
+    const base_field_name = try p.comp.intern(base_field_name_tok, p.locs);
     try p.validateFieldAccess(base_ty, base_ty, base_field_name_tok, base_field_name);
     const base_node = try p.addNode(.{ .tag = .default_init_expr, .ty = base_ty, .data = undefined });
 
@@ -5542,7 +5543,7 @@ fn offsetofMemberDesignator(p: *Parser, base_ty: Type) Error!Result {
         .period => {
             p.tok_i += 1;
             const field_name_tok = try p.expectIdentifier();
-            const field_name = try p.comp.intern(field_name_tok, locs);
+            const field_name = try p.comp.intern(field_name_tok, p.locs);
 
             if (!lhs.ty.isRecord()) {
                 try p.errStr(.offsetof_ty, field_name_tok, try p.typeStr(lhs.ty));

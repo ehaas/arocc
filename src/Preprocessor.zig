@@ -629,6 +629,7 @@ fn expr(pp: *Preprocessor, tokenizer: *Tokenizer) MacroError!bool {
         .comp = pp.comp,
         .gpa = pp.gpa,
         .tok_ids = pp.tokens.items(.id),
+        .locs = pp.tokens.items(.loc),
         .tok_i = @intCast(u32, start),
         .arena = pp.arena.allocator(),
         .in_macro = true,
