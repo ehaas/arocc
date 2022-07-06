@@ -15,17 +15,15 @@ pub const TreeTypePrinter = struct {
     locs: []const Source.Location,
     pub fn init(comp: *const Compilation, locs: []const Source.Location) TreeTypePrinter {
         return .{
-            .base = .{ .lookup = getString },
+            .base = .{ .lookup = lookup },
             .comp = comp,
             .locs = locs,
         };
     }
 
-    fn getString(base: *StringId.Mapper, string_id: StringId) []const u8 {
-        _ = string_id;
+    fn lookup(base: *StringId.Mapper, string_id: StringId) []const u8 {
         const self = @fieldParentPtr(TreeTypePrinter, "base", base);
-        _ = self;
-        return "ok";
+        return self.comp.getString(string_id, self.locs);
     }
 };
 
@@ -1148,7 +1146,7 @@ fn dumpNode(tree: Tree, node: NodeIndex, level: u32, type_printer: *StringId.Map
             try w.writeByteNTimes(' ', level + 1);
             try w.writeAll("name: ");
             if (tree.comp.diag.color) util.setColor(NAME, w);
-            try w.print("{d}\n", .{lhs_ty.data.record.fields[data.member.index].name}); // TODO qqq
+            try w.print("{s}\n", .{lhs_ty.data.record.fields[data.member.index].name.lookup(type_printer)});
             if (tree.comp.diag.color) util.setColor(.reset, w);
         },
         .array_access_expr => {

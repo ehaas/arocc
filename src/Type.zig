@@ -2092,9 +2092,9 @@ pub fn dump(ty: Type, type_printer: *StringId.Mapper, w: anytype) @TypeOf(w).Err
         .@"enum" => {
             const enum_ty = ty.data.@"enum";
             if (enum_ty.isIncomplete() and !enum_ty.fixed) {
-                try w.print("enum {d}", .{enum_ty.name});
+                try w.print("enum {s}", .{enum_ty.name.lookup(type_printer)});
             } else {
-                try w.print("enum {d}: ", .{enum_ty.name});
+                try w.print("enum {s}: ", .{enum_ty.name.lookup(type_printer)});
                 try enum_ty.tag_ty.dump(type_printer, w);
             }
             if (dump_detailed_containers) try dumpEnum(enum_ty, type_printer, w);
