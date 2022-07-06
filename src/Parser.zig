@@ -541,18 +541,18 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!Tree {
     _ = try p.addNode(.{ .tag = .invalid, .ty = undefined, .data = undefined });
 
     {
-        try p.syms.defineTypedef(&p, try p.comp.internString("__int128_t"), .{ .specifier = .int128 }, 0, .none);
-        try p.syms.defineTypedef(&p, try p.comp.internString("__uint128_t"), .{ .specifier = .uint128 }, 0, .none);
+        try p.syms.defineTypedef(&p, try p.comp.internString("__int128_t", p.locs), .{ .specifier = .int128 }, 0, .none);
+        try p.syms.defineTypedef(&p, try p.comp.internString("__uint128_t", p.locs), .{ .specifier = .uint128 }, 0, .none);
 
         const elem_ty = try p.arena.create(Type);
         elem_ty.* = .{ .specifier = .char };
-        try p.syms.defineTypedef(&p, try p.comp.internString("__builtin_ms_va_list"), .{
+        try p.syms.defineTypedef(&p, try p.comp.internString("__builtin_ms_va_list", p.locs), .{
             .specifier = .pointer,
             .data = .{ .sub_type = elem_ty },
         }, 0, .none);
 
         const ty = &pp.comp.types.va_list;
-        try p.syms.defineTypedef(&p, try p.comp.internString("__builtin_va_list"), ty.*, 0, .none);
+        try p.syms.defineTypedef(&p, try p.comp.internString("__builtin_va_list", p.locs), ty.*, 0, .none);
 
         if (ty.isArray()) ty.decayArray();
     }
@@ -1614,7 +1614,7 @@ fn getAnonymousName(p: *Parser, kind_tok: TokenIndex) !StringId {
         .{ kind_str, source.path, line_col.line_no, line_col.col },
     );
     const name = p.strings.items[strings_top..];
-    return p.comp.internString(name);
+    return p.comp.internString(name, p.locs);
 }
 
 /// recordSpec
@@ -6002,7 +6002,7 @@ fn fieldAccess(
     if (is_arrow and !is_ptr) try p.errStr(.member_expr_not_ptr, field_name_tok, try p.typeStr(expr_ty));
     if (!is_arrow and is_ptr) try p.errStr(.member_expr_ptr, field_name_tok, try p.typeStr(expr_ty));
 
-    const field_name = try p.comp.intern(field_name_tok, p.pp.tokens.items(.loc));
+    const field_name = try p.comp.intern(field_name_tok, p.locs);
     try p.validateFieldAccess(record_ty, expr_ty, field_name_tok, field_name);
     return p.fieldAccessExtra(lhs.node, record_ty, field_name, is_arrow);
 }
@@ -6102,7 +6102,7 @@ fn callExpr(p: *Parser, lhs: Result) Error!Result {
             }
             const last_param_name = func_params[func_params.len - 1].name;
             const decl_ref = p.getNode(raw_arg_node, .decl_ref_expr);
-            if (decl_ref == null or last_param_name != try p.comp.intern(p.nodes.items(.data)[@enumToInt(decl_ref.?)].decl_ref, p.pp.tokens.items(.loc))) {
+            if (decl_ref == null or last_param_name != try p.comp.intern(p.nodes.items(.data)[@enumToInt(decl_ref.?)].decl_ref, p.locs)) {
                 try p.errTok(.va_start_not_last_param, param_tok);
             }
         } else {
@@ -6206,7 +6206,7 @@ fn primaryExpr(p: *Parser) Error!Result {
         .identifier, .extended_identifier => {
             const name_tok = p.expectIdentifier() catch unreachable;
             const name = p.tokSlice(name_tok);
-            const interned_name = try p.comp.intern(name_tok, p.pp.tokens.items(.loc));
+            const interned_name = try p.comp.intern(name_tok, p.locs);
             if (p.comp.builtins.get(name)) |some| {
                 for (p.tok_ids[p.tok_i..]) |id| switch (id) {
                     .r_paren => {}, // closing grouped expr
