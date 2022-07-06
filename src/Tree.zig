@@ -5,22 +5,23 @@ const Compilation = @import("Compilation.zig");
 const Source = @import("Source.zig");
 const Attribute = @import("Attribute.zig");
 const Value = @import("Value.zig");
+const StringId = @import("interned_string.zig").StringId;
 
 const Tree = @This();
 
 pub const TreeTypePrinter = struct {
-    base: Type.TypePrinter,
+    base: StringId.Mapper,
     comp: *const Compilation,
     locs: []const Source.Location,
     pub fn init(comp: *const Compilation, locs: []const Source.Location) TreeTypePrinter {
         return .{
-            .base = .{ .getString = getString },
+            .base = .{ .lookup = getString },
             .comp = comp,
             .locs = locs,
         };
     }
 
-    fn getString(base: *Type.TypePrinter, string_id: Compilation.StringId) []const u8 {
+    fn getString(base: *StringId.Mapper, string_id: StringId) []const u8 {
         _ = string_id;
         const self = @fieldParentPtr(TreeTypePrinter, "base", base);
         _ = self;
@@ -661,7 +662,7 @@ fn dumpAttribute(attr: Attribute, writer: anytype) !void {
     }
 }
 
-fn dumpNode(tree: Tree, node: NodeIndex, level: u32, type_printer: *Type.TypePrinter, w: anytype) @TypeOf(w).Error!void {
+fn dumpNode(tree: Tree, node: NodeIndex, level: u32, type_printer: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     const delta = 2;
     const half = delta / 2;
     const util = @import("util.zig");

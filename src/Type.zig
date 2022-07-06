@@ -4,13 +4,10 @@ const TokenIndex = Tree.TokenIndex;
 const NodeIndex = Tree.NodeIndex;
 const Parser = @import("Parser.zig");
 const Compilation = @import("Compilation.zig");
+const StringId = @import("interned_string.zig").StringId;
 const Attribute = @import("Attribute.zig");
 
 const Type = @This();
-
-pub const TypePrinter = struct {
-    getString: fn (*@This(), Compilation.StringId) []const u8,
-};
 
 pub const Qualifiers = packed struct {
     @"const": bool = false,
@@ -101,7 +98,7 @@ pub const Func = struct {
     params: []Param,
 
     pub const Param = struct {
-        name: Compilation.StringId,
+        name: StringId,
         ty: Type,
         name_tok: TokenIndex,
     };
@@ -139,13 +136,13 @@ pub const Attributed = struct {
 
 // TODO improve memory usage
 pub const Enum = struct {
-    name: Compilation.StringId,
+    name: StringId,
     tag_ty: Type,
     fields: []Field,
     fixed: bool,
 
     pub const Field = struct {
-        name: Compilation.StringId,
+        name: StringId,
         ty: Type,
         name_tok: TokenIndex,
         node: NodeIndex,
@@ -155,7 +152,7 @@ pub const Enum = struct {
         return e.fields.len == std.math.maxInt(usize);
     }
 
-    pub fn create(allocator: std.mem.Allocator, name: Compilation.StringId, fixed_ty: ?Type) !*Enum {
+    pub fn create(allocator: std.mem.Allocator, name: StringId, fixed_ty: ?Type) !*Enum {
         var e = try allocator.create(Enum);
         e.name = name;
         e.fields.len = std.math.maxInt(usize);
@@ -167,7 +164,7 @@ pub const Enum = struct {
 
 // TODO improve memory usage
 pub const Record = struct {
-    name: Compilation.StringId,
+    name: StringId,
     fields: []Field,
     size: u64,
     alignment: u29,
@@ -178,7 +175,7 @@ pub const Record = struct {
     field_attributes: ?[*][]const Attribute,
 
     pub const Field = struct {
-        name: Compilation.StringId,
+        name: StringId,
         ty: Type,
         /// zero for anonymous fields
         name_tok: TokenIndex = 0,
@@ -193,7 +190,7 @@ pub const Record = struct {
         return r.fields.len == std.math.maxInt(usize);
     }
 
-    pub fn create(allocator: std.mem.Allocator, name: Compilation.StringId) !*Record {
+    pub fn create(allocator: std.mem.Allocator, name: StringId) !*Record {
         var r = try allocator.create(Record);
         r.name = name;
         r.fields.len = std.math.maxInt(usize);
@@ -616,7 +613,7 @@ pub fn hasUnboundVLA(ty: Type) bool {
     }
 }
 
-pub fn hasField(ty: Type, name: Compilation.StringId) bool {
+pub fn hasField(ty: Type, name: StringId) bool {
     switch (ty.specifier) {
         .@"struct" => {
             std.debug.assert(!ty.data.record.isIncomplete());
@@ -1890,12 +1887,12 @@ pub fn hasAttribute(ty: Type, tag: Attribute.Tag) bool {
 }
 
 /// Print type in C style
-pub fn print(ty: Type, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Error!void {
+pub fn print(ty: Type, type_printer: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     _ = try ty.printPrologue(type_printer, w);
     try ty.printEpilogue(type_printer, w);
 }
 
-pub fn printNamed(ty: Type, name: []const u8, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Error!void {
+pub fn printNamed(ty: Type, name: []const u8, type_printer: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     const simple = try ty.printPrologue(type_printer, w);
     if (simple) try w.writeByte(' ');
     try w.writeAll(name);
@@ -1905,7 +1902,7 @@ pub fn printNamed(ty: Type, name: []const u8, type_printer: *TypePrinter, w: any
 const StringGetter = fn (TokenIndex) []const u8;
 
 /// return true if `ty` is simple
-fn printPrologue(ty: Type, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Error!bool {
+fn printPrologue(ty: Type, type_printer: *StringId.Mapper, w: anytype) @TypeOf(w).Error!bool {
     if (ty.qual.atomic) {
         var non_atomic_ty = ty;
         non_atomic_ty.qual.atomic = false;
@@ -1958,13 +1955,13 @@ fn printPrologue(ty: Type, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Er
 
     switch (ty.specifier) {
         .@"enum" => if (ty.data.@"enum".fixed) {
-            try w.print("enum {s}: ", .{type_printer.getString(ty.data.@"enum".name)});
-            try ty.data.@"enum".tag_ty.dump(w);
+            try w.print("enum {s}: ", .{ty.data.@"enum".name.lookup(type_printer)});
+            try ty.data.@"enum".tag_ty.dump(type_printer, w);
         } else {
-            try w.print("enum {s}", .{type_printer.getString(ty.data.@"enum".name)});
+            try w.print("enum {s}", .{ty.data.@"enum".name.lookup(type_printer)});
         },
-        .@"struct" => try w.print("struct {s}", .{type_printer.getString(ty.data.record.name)}),
-        .@"union" => try w.print("union {s}", .{type_printer.getString(ty.data.record.name)}),
+        .@"struct" => try w.print("struct {s}", .{ty.data.record.name.lookup(type_printer)}),
+        .@"union" => try w.print("union {s}", .{ty.data.record.name.lookup(type_printer)}),
         .vector => {
             const len = ty.data.array.len;
             const elem_ty = ty.data.array.elem;
@@ -1981,7 +1978,7 @@ fn printPrologue(ty: Type, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Er
     return true;
 }
 
-fn printEpilogue(ty: Type, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Error!void {
+fn printEpilogue(ty: Type, type_printer: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     if (ty.qual.atomic) return;
     switch (ty.specifier) {
         .pointer,
@@ -2054,7 +2051,7 @@ fn printEpilogue(ty: Type, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Er
 const dump_detailed_containers = false;
 
 // Print as Zig types since those are actually readable
-pub fn dump(ty: Type, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Error!void {
+pub fn dump(ty: Type, type_printer: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     try ty.qual.dump(w);
     switch (ty.specifier) {
         .pointer => {
@@ -2065,7 +2062,7 @@ pub fn dump(ty: Type, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Error!v
             try w.writeAll("fn (");
             for (ty.data.func.params) |param, i| {
                 if (i != 0) try w.writeAll(", ");
-                if (param.name != .empty) try w.print("{s}: ", .{type_printer.getString(param.name)});
+                if (param.name != .empty) try w.print("{s}: ", .{param.name.lookup(type_printer)});
                 try param.ty.dump(type_printer, w);
             }
             if (ty.specifier != .func) {
@@ -2103,11 +2100,11 @@ pub fn dump(ty: Type, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Error!v
             if (dump_detailed_containers) try dumpEnum(enum_ty, type_printer, w);
         },
         .@"struct" => {
-            try w.print("struct {s}", .{type_printer.getString(ty.data.record.name)});
+            try w.print("struct {s}", .{ty.data.record.name.lookup(type_printer)});
             if (dump_detailed_containers) try dumpRecord(ty.data.record, type_printer, w);
         },
         .@"union" => {
-            try w.print("union {s}", .{type_printer.getString(ty.data.record.name)});
+            try w.print("union {s}", .{ty.data.record.name.lookup(type_printer)});
             if (dump_detailed_containers) try dumpRecord(ty.data.record, type_printer, w);
         },
         .unspecified_variable_len_array, .decayed_unspecified_variable_len_array => {
@@ -2140,20 +2137,20 @@ pub fn dump(ty: Type, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Error!v
     }
 }
 
-fn dumpEnum(@"enum": *Enum, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Error!void {
+fn dumpEnum(@"enum": *Enum, type_printer: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     try w.writeAll(" {");
     for (@"enum".fields) |field| {
-        try w.print(" {s} = {d},", .{ type_printer.getString(field.name), field.value });
+        try w.print(" {s} = {d},", .{ field.name.lookup(type_printer), field.value });
     }
     try w.writeAll(" }");
 }
 
-fn dumpRecord(record: *Record, type_printer: *TypePrinter, w: anytype) @TypeOf(w).Error!void {
+fn dumpRecord(record: *Record, type_printer: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     try w.writeAll(" {");
     for (record.fields) |field| {
         try w.writeByte(' ');
         try field.ty.dump(type_printer, w);
-        try w.print(" {s}: {d};", .{ type_printer.getString(field.name), field.bit_width });
+        try w.print(" {s}: {d};", .{ field.name.lookup(type_printer), field.bit_width });
     }
     try w.writeAll(" }");
 }

@@ -19,6 +19,7 @@ const CharInfo = @import("CharInfo.zig");
 const Value = @import("Value.zig");
 const SymbolStack = @import("SymbolStack.zig");
 const Symbol = SymbolStack.Symbol;
+const StringId = @import("interned_string.zig").StringId;
 
 const Parser = @This();
 
@@ -1596,7 +1597,7 @@ fn typeSpec(p: *Parser, ty: *Type.Builder) Error!bool {
     return p.tok_i != start;
 }
 
-fn getAnonymousName(p: *Parser, kind_tok: TokenIndex) !Compilation.StringId {
+fn getAnonymousName(p: *Parser, kind_tok: TokenIndex) !StringId {
     const loc = p.locs[kind_tok];
     const source = p.comp.getSource(loc.id);
     const line_col = source.lineCol(loc);
@@ -6006,7 +6007,7 @@ fn fieldAccess(
     return p.fieldAccessExtra(lhs.node, record_ty, field_name, is_arrow);
 }
 
-fn validateFieldAccess(p: *Parser, record_ty: Type, expr_ty: Type, field_name_tok: TokenIndex, field_name: Compilation.StringId) Error!void {
+fn validateFieldAccess(p: *Parser, record_ty: Type, expr_ty: Type, field_name_tok: TokenIndex, field_name: StringId) Error!void {
     if (record_ty.hasField(field_name)) return;
 
     p.strings.items.len = 0;
@@ -6021,7 +6022,7 @@ fn validateFieldAccess(p: *Parser, record_ty: Type, expr_ty: Type, field_name_to
     return error.ParsingFailed;
 }
 
-fn fieldAccessExtra(p: *Parser, lhs: NodeIndex, record_ty: Type, field_name: Compilation.StringId, is_arrow: bool) Error!Result {
+fn fieldAccessExtra(p: *Parser, lhs: NodeIndex, record_ty: Type, field_name: StringId, is_arrow: bool) Error!Result {
     for (record_ty.data.record.fields) |f, i| {
         if (f.isAnonymousRecord()) {
             if (!f.ty.hasField(field_name)) continue;

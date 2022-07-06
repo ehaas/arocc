@@ -20,11 +20,6 @@ pub const Error = error{
     FatalError,
 } || Allocator.Error;
 
-pub const StringId = enum(u32) {
-    empty = 0xFFFF_FFFF,
-    _,
-};
-
 const StringToIdMap = std.HashMapUnmanaged(StringId, void, StringIdContext, std.hash_map.default_max_load_percentage);
 
 /// Context for actually being able to compare two keys

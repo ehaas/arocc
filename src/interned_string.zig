@@ -1,7 +1,7 @@
 pub const StringId = enum(u32) {
     pub const Mapper = struct {
         lookup: fn (
-            mapper: @This(),
+            mapper: *@This(),
             string_id: StringId,
         ) []const u8,
     };

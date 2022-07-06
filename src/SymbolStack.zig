@@ -9,7 +9,7 @@ const NodeIndex = Tree.NodeIndex;
 const Type = @import("Type.zig");
 const Parser = @import("Parser.zig");
 const Value = @import("Value.zig");
-const StringId = @import("Compilation.zig").StringId;
+const StringId = @import("interned_string.zig").StringId;
 
 const SymbolStack = @This();
 
