@@ -11,6 +11,7 @@ const Tokenizer = @import("Tokenizer.zig");
 const Token = Tokenizer.Token;
 const Type = @import("Type.zig");
 const Pragma = @import("Pragma.zig");
+const StringId = @import("interned_string.zig").StringId;
 
 const Compilation = @This();
 
@@ -448,7 +449,7 @@ pub fn generateBuiltinMacros(comp: *Compilation) !Source {
 
 fn generateTypeMacro(w: anytype, name: []const u8, ty: Type) !void {
     try w.print("#define {s} ", .{name});
-    try ty.print(w);
+    try ty.print(undefined, w);
     try w.writeByte('\n');
 }
 

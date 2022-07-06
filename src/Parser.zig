@@ -336,7 +336,8 @@ pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
     const strings_top = p.strings.items.len;
     defer p.strings.items.len = strings_top;
 
-    try ty.print(p.strings.writer());
+    var printer = Tree.TreeTypePrinter.init(p.comp, p.locs);
+    try ty.print(&printer.base, p.strings.writer());
     return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[strings_top..]);
 }
 
@@ -349,11 +350,12 @@ pub fn typePairStrExtra(p: *Parser, a: Type, msg: []const u8, b: Type) ![]const 
     defer p.strings.items.len = strings_top;
 
     try p.strings.append('\'');
-    try a.print(p.strings.writer());
+    var printer = Tree.TreeTypePrinter.init(p.comp, p.locs);
+    try a.print(&printer.base, p.strings.writer());
     try p.strings.append('\'');
     try p.strings.appendSlice(msg);
     try p.strings.append('\'');
-    try b.print(p.strings.writer());
+    try b.print(&printer.base, p.strings.writer());
     try p.strings.append('\'');
     return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[strings_top..]);
 }
@@ -6010,7 +6012,8 @@ fn validateFieldAccess(p: *Parser, record_ty: Type, expr_ty: Type, field_name_to
     p.strings.items.len = 0;
 
     try p.strings.writer().print("'{s}' in '", .{p.tokSlice(field_name_tok)});
-    try expr_ty.print(p.strings.writer());
+    var printer = Tree.TreeTypePrinter.init(p.comp, p.locs);
+    try expr_ty.print(&printer.base, p.strings.writer());
     try p.strings.append('\'');
 
     const duped = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items);
@@ -6098,8 +6101,7 @@ fn callExpr(p: *Parser, lhs: Result) Error!Result {
             }
             const last_param_name = func_params[func_params.len - 1].name;
             const decl_ref = p.getNode(raw_arg_node, .decl_ref_expr);
-            if (decl_ref == null or last_param_name == try p.comp.intern(p.nodes.items(.data)[@enumToInt(decl_ref.?)].decl_ref, p.pp.tokens.items(.loc)))
-            {
+            if (decl_ref == null or last_param_name == try p.comp.intern(p.nodes.items(.data)[@enumToInt(decl_ref.?)].decl_ref, p.pp.tokens.items(.loc))) {
                 try p.errTok(.va_start_not_last_param, param_tok);
             }
         } else {
@@ -6310,8 +6312,9 @@ fn primaryExpr(p: *Parser) Error!Result {
             if (p.func.pretty_ident) |some| {
                 ty = some.ty;
             } else if (p.func.ty) |func_ty| {
+                var printer = Tree.TreeTypePrinter.init(p.comp, p.locs);
                 p.strings.items.len = 0;
-                try Type.printNamed(func_ty, p.tokSlice(p.func.name), p.strings.writer());
+                try Type.printNamed(func_ty, p.tokSlice(p.func.name), &printer.base, p.strings.writer());
                 try p.strings.append(0);
                 const predef = try p.makePredefinedIdentifier();
                 ty = predef.ty;
