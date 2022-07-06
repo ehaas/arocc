@@ -7,6 +7,7 @@ const Tree = aro.Tree;
 const Token = Tree.Token;
 const NodeIndex = Tree.NodeIndex;
 const AllocatorError = std.mem.Allocator.Error;
+const StringId = aro.StringId;
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -290,7 +291,9 @@ pub fn main() !void {
             var actual = StmtTypeDumper.init(gpa);
             defer actual.deinit(gpa);
 
-            try actual.dump(&tree, test_fn.decl.node, gpa);
+            var mapper = Tree.TreeTypePrinter.init(tree.comp, tree.tokens.items(.loc));
+
+            try actual.dump(&tree, &mapper.base, test_fn.decl.node, gpa);
 
             var i: usize = 0;
             for (types.tokens) |str| {
@@ -529,18 +532,18 @@ const StmtTypeDumper = struct {
         };
     }
 
-    fn dumpNode(self: *StmtTypeDumper, tree: *const aro.Tree, node: NodeIndex, m: *MsgWriter) AllocatorError!void {
+    fn dumpNode(self: *StmtTypeDumper, tree: *const aro.Tree, mapper: *StringId.Mapper, node: NodeIndex, m: *MsgWriter) AllocatorError!void {
         if (node == .none) return;
         const tag = tree.nodes.items(.tag)[@enumToInt(node)];
         if (tag == .implicit_return) return;
         const ty = tree.nodes.items(.ty)[@enumToInt(node)];
-        ty.dump(m.buf.writer()) catch {};
+        ty.dump(mapper, m.buf.writer()) catch {};
         const owned = m.buf.toOwnedSlice();
         errdefer m.buf.allocator.free(owned);
         try self.types.append(owned);
     }
 
-    fn dump(self: *StmtTypeDumper, tree: *const aro.Tree, decl_idx: NodeIndex, allocator: std.mem.Allocator) AllocatorError!void {
+    fn dump(self: *StmtTypeDumper, tree: *const aro.Tree, mapper: *StringId.Mapper, decl_idx: NodeIndex, allocator: std.mem.Allocator) AllocatorError!void {
         var m = MsgWriter.init(allocator);
         defer m.deinit();
 
@@ -551,12 +554,12 @@ const StmtTypeDumper = struct {
 
         switch (tag) {
             .compound_stmt_two => {
-                try self.dumpNode(tree, data.bin.lhs, &m);
-                try self.dumpNode(tree, data.bin.rhs, &m);
+                try self.dumpNode(tree, mapper, data.bin.lhs, &m);
+                try self.dumpNode(tree, mapper, data.bin.rhs, &m);
             },
             .compound_stmt => {
                 for (tree.data[data.range.start..data.range.end]) |stmt| {
-                    try self.dumpNode(tree, stmt, &m);
+                    try self.dumpNode(tree, mapper, stmt, &m);
                 }
             },
             else => unreachable,
