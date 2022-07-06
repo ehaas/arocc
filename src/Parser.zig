@@ -6102,7 +6102,7 @@ fn callExpr(p: *Parser, lhs: Result) Error!Result {
             }
             const last_param_name = func_params[func_params.len - 1].name;
             const decl_ref = p.getNode(raw_arg_node, .decl_ref_expr);
-            if (decl_ref == null or last_param_name == try p.comp.intern(p.nodes.items(.data)[@enumToInt(decl_ref.?)].decl_ref, p.pp.tokens.items(.loc))) {
+            if (decl_ref == null or last_param_name != try p.comp.intern(p.nodes.items(.data)[@enumToInt(decl_ref.?)].decl_ref, p.pp.tokens.items(.loc))) {
                 try p.errTok(.va_start_not_last_param, param_tok);
             }
         } else {
