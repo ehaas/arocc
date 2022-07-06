@@ -337,7 +337,7 @@ pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
     const strings_top = p.strings.items.len;
     defer p.strings.items.len = strings_top;
 
-    var mapper = p.comp.typeMapper(p.locs);
+    const mapper = p.comp.typeMapper(p.locs);
     try ty.print(&mapper.base, p.strings.writer());
     return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[strings_top..]);
 }
@@ -351,7 +351,7 @@ pub fn typePairStrExtra(p: *Parser, a: Type, msg: []const u8, b: Type) ![]const 
     defer p.strings.items.len = strings_top;
 
     try p.strings.append('\'');
-    var mapper = p.comp.typeMapper(p.locs);
+    const mapper = p.comp.typeMapper(p.locs);
     try a.print(&mapper.base, p.strings.writer());
     try p.strings.append('\'');
     try p.strings.appendSlice(msg);
@@ -6013,7 +6013,7 @@ fn validateFieldAccess(p: *Parser, record_ty: Type, expr_ty: Type, field_name_to
     p.strings.items.len = 0;
 
     try p.strings.writer().print("'{s}' in '", .{p.tokSlice(field_name_tok)});
-    var mapper = p.comp.typeMapper(p.locs);
+    const mapper = p.comp.typeMapper(p.locs);
     try expr_ty.print(&mapper.base, p.strings.writer());
     try p.strings.append('\'');
 
@@ -6313,7 +6313,7 @@ fn primaryExpr(p: *Parser) Error!Result {
             if (p.func.pretty_ident) |some| {
                 ty = some.ty;
             } else if (p.func.ty) |func_ty| {
-                var mapper = p.comp.typeMapper(p.locs);
+                const mapper = p.comp.typeMapper(p.locs);
                 p.strings.items.len = 0;
                 try Type.printNamed(func_ty, p.tokSlice(p.func.name), &mapper.base, p.strings.writer());
                 try p.strings.append(0);

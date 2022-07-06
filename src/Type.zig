@@ -1887,12 +1887,12 @@ pub fn hasAttribute(ty: Type, tag: Attribute.Tag) bool {
 }
 
 /// Print type in C style
-pub fn print(ty: Type, mapper: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
+pub fn print(ty: Type, mapper: *const StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     _ = try ty.printPrologue(mapper, w);
     try ty.printEpilogue(mapper, w);
 }
 
-pub fn printNamed(ty: Type, name: []const u8, mapper: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
+pub fn printNamed(ty: Type, name: []const u8, mapper: *const StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     const simple = try ty.printPrologue(mapper, w);
     if (simple) try w.writeByte(' ');
     try w.writeAll(name);
@@ -1902,7 +1902,7 @@ pub fn printNamed(ty: Type, name: []const u8, mapper: *StringId.Mapper, w: anyty
 const StringGetter = fn (TokenIndex) []const u8;
 
 /// return true if `ty` is simple
-fn printPrologue(ty: Type, mapper: *StringId.Mapper, w: anytype) @TypeOf(w).Error!bool {
+fn printPrologue(ty: Type, mapper: *const StringId.Mapper, w: anytype) @TypeOf(w).Error!bool {
     if (ty.qual.atomic) {
         var non_atomic_ty = ty;
         non_atomic_ty.qual.atomic = false;
@@ -1978,7 +1978,7 @@ fn printPrologue(ty: Type, mapper: *StringId.Mapper, w: anytype) @TypeOf(w).Erro
     return true;
 }
 
-fn printEpilogue(ty: Type, mapper: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
+fn printEpilogue(ty: Type, mapper: *const StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     if (ty.qual.atomic) return;
     switch (ty.specifier) {
         .pointer,
@@ -2051,7 +2051,7 @@ fn printEpilogue(ty: Type, mapper: *StringId.Mapper, w: anytype) @TypeOf(w).Erro
 const dump_detailed_containers = false;
 
 // Print as Zig types since those are actually readable
-pub fn dump(ty: Type, mapper: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
+pub fn dump(ty: Type, mapper: *const StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     try ty.qual.dump(w);
     switch (ty.specifier) {
         .pointer => {
@@ -2137,7 +2137,7 @@ pub fn dump(ty: Type, mapper: *StringId.Mapper, w: anytype) @TypeOf(w).Error!voi
     }
 }
 
-fn dumpEnum(@"enum": *Enum, mapper: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
+fn dumpEnum(@"enum": *Enum, mapper: *const StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     try w.writeAll(" {");
     for (@"enum".fields) |field| {
         try w.print(" {s} = {d},", .{ field.name.lookup(mapper), field.value });
@@ -2145,7 +2145,7 @@ fn dumpEnum(@"enum": *Enum, mapper: *StringId.Mapper, w: anytype) @TypeOf(w).Err
     try w.writeAll(" }");
 }
 
-fn dumpRecord(record: *Record, mapper: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
+fn dumpRecord(record: *Record, mapper: *const StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     try w.writeAll(" {");
     for (record.fields) |field| {
         try w.writeByte(' ');

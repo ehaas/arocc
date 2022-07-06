@@ -597,7 +597,7 @@ pub fn tokSlice(tree: Tree, tok_i: TokenIndex) []const u8 {
 }
 
 pub fn dump(tree: Tree, writer: anytype) @TypeOf(writer).Error!void {
-    var mapper = tree.comp.typeMapper(tree.tokens.items(.loc));
+    const mapper = tree.comp.typeMapper(tree.tokens.items(.loc));
     for (tree.root_decls) |i| {
         try tree.dumpNode(i, 0, &mapper.base, writer);
         try writer.writeByte('\n');
@@ -642,7 +642,7 @@ fn dumpAttribute(attr: Attribute, writer: anytype) !void {
     }
 }
 
-fn dumpNode(tree: Tree, node: NodeIndex, level: u32, mapper: *StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
+fn dumpNode(tree: Tree, node: NodeIndex, level: u32, mapper: *const StringId.Mapper, w: anytype) @TypeOf(w).Error!void {
     const delta = 2;
     const half = delta / 2;
     const util = @import("util.zig");

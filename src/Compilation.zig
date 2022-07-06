@@ -34,7 +34,7 @@ const TypeMapper = struct {
         };
     }
 
-    fn lookup(base: *StringId.Mapper, string_id: StringId) []const u8 {
+    fn lookup(base: *const StringId.Mapper, string_id: StringId) []const u8 {
         const self = @fieldParentPtr(TypeMapper, "base", base);
         return self.comp.getString(string_id, self.locs);
     }

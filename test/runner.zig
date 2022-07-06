@@ -291,7 +291,7 @@ pub fn main() !void {
             var actual = StmtTypeDumper.init(gpa);
             defer actual.deinit(gpa);
 
-            var mapper = tree.comp.typeMapper(tree.tokens.items(.loc));
+            const mapper = tree.comp.typeMapper(tree.tokens.items(.loc));
 
             try actual.dump(&tree, &mapper.base, test_fn.decl.node, gpa);
 
@@ -532,7 +532,7 @@ const StmtTypeDumper = struct {
         };
     }
 
-    fn dumpNode(self: *StmtTypeDumper, tree: *const aro.Tree, mapper: *StringId.Mapper, node: NodeIndex, m: *MsgWriter) AllocatorError!void {
+    fn dumpNode(self: *StmtTypeDumper, tree: *const aro.Tree, mapper: *const StringId.Mapper, node: NodeIndex, m: *MsgWriter) AllocatorError!void {
         if (node == .none) return;
         const tag = tree.nodes.items(.tag)[@enumToInt(node)];
         if (tag == .implicit_return) return;
@@ -543,7 +543,7 @@ const StmtTypeDumper = struct {
         try self.types.append(owned);
     }
 
-    fn dump(self: *StmtTypeDumper, tree: *const aro.Tree, mapper: *StringId.Mapper, decl_idx: NodeIndex, allocator: std.mem.Allocator) AllocatorError!void {
+    fn dump(self: *StmtTypeDumper, tree: *const aro.Tree, mapper: *const StringId.Mapper, decl_idx: NodeIndex, allocator: std.mem.Allocator) AllocatorError!void {
         var m = MsgWriter.init(allocator);
         defer m.deinit();
 
