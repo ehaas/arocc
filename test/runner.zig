@@ -291,7 +291,7 @@ pub fn main() !void {
             var actual = StmtTypeDumper.init(gpa);
             defer actual.deinit(gpa);
 
-            var mapper = Tree.TreeTypePrinter.init(tree.comp, tree.tokens.items(.loc));
+            var mapper = tree.comp.typeMapper(tree.tokens.items(.loc));
 
             try actual.dump(&tree, &mapper.base, test_fn.decl.node, gpa);
 

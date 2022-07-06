@@ -337,8 +337,8 @@ pub fn typeStr(p: *Parser, ty: Type) ![]const u8 {
     const strings_top = p.strings.items.len;
     defer p.strings.items.len = strings_top;
 
-    var printer = Tree.TreeTypePrinter.init(p.comp, p.locs);
-    try ty.print(&printer.base, p.strings.writer());
+    var mapper = p.comp.typeMapper(p.locs);
+    try ty.print(&mapper.base, p.strings.writer());
     return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[strings_top..]);
 }
 
@@ -351,12 +351,12 @@ pub fn typePairStrExtra(p: *Parser, a: Type, msg: []const u8, b: Type) ![]const 
     defer p.strings.items.len = strings_top;
 
     try p.strings.append('\'');
-    var printer = Tree.TreeTypePrinter.init(p.comp, p.locs);
-    try a.print(&printer.base, p.strings.writer());
+    var mapper = p.comp.typeMapper(p.locs);
+    try a.print(&mapper.base, p.strings.writer());
     try p.strings.append('\'');
     try p.strings.appendSlice(msg);
     try p.strings.append('\'');
-    try b.print(&printer.base, p.strings.writer());
+    try b.print(&mapper.base, p.strings.writer());
     try p.strings.append('\'');
     return try p.comp.diag.arena.allocator().dupe(u8, p.strings.items[strings_top..]);
 }
@@ -6013,8 +6013,8 @@ fn validateFieldAccess(p: *Parser, record_ty: Type, expr_ty: Type, field_name_to
     p.strings.items.len = 0;
 
     try p.strings.writer().print("'{s}' in '", .{p.tokSlice(field_name_tok)});
-    var printer = Tree.TreeTypePrinter.init(p.comp, p.locs);
-    try expr_ty.print(&printer.base, p.strings.writer());
+    var mapper = p.comp.typeMapper(p.locs);
+    try expr_ty.print(&mapper.base, p.strings.writer());
     try p.strings.append('\'');
 
     const duped = try p.comp.diag.arena.allocator().dupe(u8, p.strings.items);
@@ -6313,9 +6313,9 @@ fn primaryExpr(p: *Parser) Error!Result {
             if (p.func.pretty_ident) |some| {
                 ty = some.ty;
             } else if (p.func.ty) |func_ty| {
-                var printer = Tree.TreeTypePrinter.init(p.comp, p.locs);
+                var mapper = p.comp.typeMapper(p.locs);
                 p.strings.items.len = 0;
-                try Type.printNamed(func_ty, p.tokSlice(p.func.name), &printer.base, p.strings.writer());
+                try Type.printNamed(func_ty, p.tokSlice(p.func.name), &mapper.base, p.strings.writer());
                 try p.strings.append(0);
                 const predef = try p.makePredefinedIdentifier();
                 ty = predef.ty;

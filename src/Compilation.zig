@@ -22,6 +22,24 @@ pub const Error = error{
 
 const StringToIdMap = std.HashMapUnmanaged(StringId, void, StringIdContext, std.hash_map.default_max_load_percentage);
 
+const TypeMapper = struct {
+    base: StringId.Mapper,
+    comp: *const Compilation,
+    locs: []const Source.Location,
+    pub fn init(comp: *const Compilation, locs: []const Source.Location) TypeMapper {
+        return .{
+            .base = .{ .lookup = lookup },
+            .comp = comp,
+            .locs = locs,
+        };
+    }
+
+    fn lookup(base: *StringId.Mapper, string_id: StringId) []const u8 {
+        const self = @fieldParentPtr(TypeMapper, "base", base);
+        return self.comp.getString(string_id, self.locs);
+    }
+};
+
 const StringIdContext = struct {
     comp: *const Compilation,
     locs: []const Source.Location,
@@ -126,6 +144,10 @@ pub fn deinit(comp: *Compilation) void {
     comp.invalid_utf8_locs.deinit(comp.gpa);
     comp.string_bytes.deinit(comp.gpa);
     comp.string_table.deinit(comp.gpa);
+}
+
+pub fn typeMapper(comp: *const Compilation, locs: []const Source.Location) TypeMapper {
+    return TypeMapper.init(comp, locs);
 }
 
 pub fn internString(comp: *Compilation, str: []const u8, locs: []const Source.Location) !StringId {
