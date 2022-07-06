@@ -22,7 +22,6 @@ pub const Error = error{
 
 const StringToIdMap = std.HashMapUnmanaged(StringId, void, StringIdContext, std.hash_map.default_max_load_percentage);
 
-/// Context for actually being able to compare two keys
 const StringIdContext = struct {
     comp: *const Compilation,
     locs: []const Source.Location,
@@ -38,6 +37,7 @@ const StringIdContext = struct {
             const x_slice = self.comp.locSlice(self.locs[as_int]);
             return std.hash_map.hashString(x_slice);
         } else {
+            if (x == .empty) return comptime std.hash_map.hashString("");
             const start = as_int & 0x7FFF_FFFF;
             const x_slice = mem.sliceTo(@ptrCast([*:0]const u8, self.comp.string_bytes.items.ptr) + start, 0);
             return std.hash_map.hashString(x_slice);
@@ -45,7 +45,6 @@ const StringIdContext = struct {
     }
 };
 
-/// Adapter for converting a string to something we can use
 const StringIdAdapter = struct {
     comp: *const Compilation,
     locs: []const Source.Location,
@@ -53,10 +52,10 @@ const StringIdAdapter = struct {
     pub fn eql(self: @This(), a_slice: []const u8, b: StringId) bool {
         const as_int = @enumToInt(b);
         if (as_int & 0x8000_0000 == 0) {
-            if (self.locs.len == 0) return false;
             const b_slice = self.comp.locSlice(self.locs[as_int]);
             return mem.eql(u8, a_slice, b_slice);
         } else {
+            if (b == .empty) return a_slice.len == 0;
             const start = as_int & 0x7FFF_FFFF;
             const b_slice = mem.sliceTo(@ptrCast([*:0]const u8, self.comp.string_bytes.items.ptr) + start, 0);
             return mem.eql(u8, a_slice, b_slice);
@@ -162,11 +161,11 @@ pub fn intern(comp: *Compilation, tok: u32, locs: []const Source.Location) !Stri
 }
 
 pub fn getString(comp: *const Compilation, string_id: StringId, locs: []const Source.Location) []const u8 {
-    if (string_id == .empty) return "";
     const as_int = @enumToInt(string_id);
     if (as_int & 0x8000_0000 == 0) {
         return comp.locSlice(locs[as_int]);
     } else {
+        if (string_id == .empty) return "";
         const start = as_int & 0x7FFF_FFFF;
         return mem.sliceTo(@ptrCast([*:0]const u8, comp.string_bytes.items.ptr) + start, 0);
     }
