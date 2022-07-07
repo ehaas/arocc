@@ -479,6 +479,18 @@ pub fn isRecord(ty: Type) bool {
     };
 }
 
+pub fn isAnonymousRecord(ty: Type, comp: *const Compilation) bool {
+    return switch (ty.specifier) {
+        // anonymous records can be recognized by their names which are in
+        // the format "(anonymous TAG at path:line:col)".
+        .@"struct", .@"union" => comp.isAnonymousRecordName(ty.data.record.name),
+        .typeof_type => ty.data.sub_type.isAnonymousRecord(comp),
+        .typeof_expr => ty.data.expr.ty.isAnonymousRecord(comp),
+        .attributed => ty.data.attributed.base.isAnonymousRecord(comp),
+        else => false,
+    };
+}
+
 pub fn elemType(ty: Type) Type {
     return switch (ty.specifier) {
         .pointer, .unspecified_variable_len_array, .decayed_unspecified_variable_len_array => ty.data.sub_type.*,

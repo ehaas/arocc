@@ -193,6 +193,13 @@ pub fn getString(comp: *const Compilation, string_id: StringId, locs: []const So
     }
 }
 
+pub fn isAnonymousRecordName(comp: *const Compilation, string_id: StringId) bool {
+    const as_int = @enumToInt(string_id);
+    if (as_int < 0x8000_0000 or string_id == .empty) return false;
+    const start = as_int & 0x7FFF_FFFF;
+    return comp.string_bytes.items[start] == '(';
+}
+
 fn generateDateAndTime(w: anytype) !void {
     // TODO take timezone into account here once it is supported in Zig std
     const timestamp = std.math.clamp(std.time.timestamp(), 0, std.math.maxInt(i64));
@@ -467,18 +474,6 @@ fn generateTypeMacro(w: anytype, name: []const u8, ty: Type) !void {
     try w.print("#define {s} ", .{name});
     try ty.print(undefined, w);
     try w.writeByte('\n');
-}
-
-pub fn isAnonymousRecord(comp: *const Compilation, ty: Type, locs: []const Source.Location) bool {
-    return switch (ty.specifier) {
-        // anonymous records can be recognized by their names which are in
-        // the format "(anonymous TAG at path:line:col)".
-        .@"struct", .@"union" => comp.getString(ty.data.record.name, locs)[0] == '(',
-        .typeof_type => comp.isAnonymousRecord(ty.data.sub_type.*, locs),
-        .typeof_expr => comp.isAnonymousRecord(ty.data.expr.ty, locs),
-        .attributed => comp.isAnonymousRecord(ty.data.attributed.base, locs),
-        else => false,
-    };
 }
 
 fn generateBuiltinTypes(comp: *Compilation) !void {

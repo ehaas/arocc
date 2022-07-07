@@ -738,7 +738,7 @@ fn decl(p: *Parser) Error!bool {
     var init_d = (try p.initDeclarator(&decl_spec, attr_buf_top)) orelse {
         _ = try p.expectToken(.semicolon);
         if (decl_spec.ty.is(.@"enum") or
-            (decl_spec.ty.isRecord() and !p.comp.isAnonymousRecord(decl_spec.ty, p.locs) and
+            (decl_spec.ty.isRecord() and !decl_spec.ty.isAnonymousRecord(p.comp) and
             !decl_spec.ty.isTypeof())) // we follow GCC and clang's behavior here
         {
             const specifier = decl_spec.ty.canonicalize(.standard).specifier;
@@ -1884,7 +1884,7 @@ fn recordDeclarator(p: *Parser) Error!bool {
 
         if (name_tok == 0 and bits_node == .none) unnamed: {
             if (ty.is(.@"enum") or ty.hasIncompleteSize()) break :unnamed;
-            if (p.comp.isAnonymousRecord(ty, p.locs)) {
+            if (ty.isAnonymousRecord(p.comp)) {
                 // An anonymous record appears as indirect fields on the parent
                 try p.record_buf.append(.{
                     .name = try p.getAnonymousName(first_tok),
