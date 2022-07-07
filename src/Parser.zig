@@ -136,13 +136,12 @@ record: struct {
     start: usize = 0,
     field_attr_start: usize = 0,
 
-    fn addField(r: @This(), p: *Parser, tok: TokenIndex) Error!void {
-        const name = p.tokSlice(tok);
+    fn addField(r: @This(), p: *Parser, name: StringId, tok: TokenIndex) Error!void {
         var i = p.record_members.items.len;
         while (i > r.start) {
             i -= 1;
-            if (mem.eql(u8, p.record_members.items[i].name, name)) {
-                try p.errStr(.duplicate_member, tok, name);
+            if (p.record_members.items[i].name == name) {
+                try p.errStr(.duplicate_member, tok, p.tokSlice(tok));
                 try p.errTok(.previous_definition, p.record_members.items[i].tok);
                 break;
             }
@@ -155,12 +154,13 @@ record: struct {
             if (f.isAnonymousRecord()) {
                 try r.addFieldsFromAnonymous(p, f.ty.canonicalize(.standard));
             } else if (f.name_tok != 0) {
-                try r.addField(p, f.name_tok);
+                const interned_name = try p.comp.intern(f.name_tok, p.locs);
+                try r.addField(p, interned_name, f.name_tok);
             }
         }
     }
 } = .{},
-record_members: std.ArrayListUnmanaged(struct { tok: TokenIndex, name: []const u8 }) = .{},
+record_members: std.ArrayListUnmanaged(struct { tok: TokenIndex, name: StringId }) = .{},
 @"switch": ?*Switch = null,
 in_loop: bool = false,
 pragma_pack: u8 = 8,
@@ -1902,13 +1902,14 @@ fn recordDeclarator(p: *Parser) Error!bool {
             }
             try p.err(.missing_declaration);
         } else {
+            const interned_name = if (name_tok != 0) try p.comp.intern(name_tok, p.locs) else try p.getAnonymousName(first_tok);
             try p.record_buf.append(.{
-                .name = if (name_tok != 0) try p.comp.intern(name_tok, p.locs) else try p.getAnonymousName(first_tok),
+                .name = interned_name,
                 .ty = ty,
                 .name_tok = name_tok,
                 .bit_width = bits,
             });
-            if (name_tok != 0) try p.record.addField(p, name_tok);
+            if (name_tok != 0) try p.record.addField(p, interned_name, name_tok);
             const node = try p.addNode(.{
                 .tag = .record_field_decl,
                 .ty = ty,
