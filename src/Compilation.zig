@@ -659,9 +659,6 @@ pub fn addSourceFromReader(comp: *Compilation, reader: anytype, path: []const u8
     };
 
     try comp.sources.put(duped_path, source);
-    if (source.offsetOfInvalidUtf8()) |offset| {
-        try comp.invalid_utf8_locs.putNoClobber(comp.gpa, source_id, offset);
-    }
     return source;
 }
 

@@ -275,6 +275,9 @@ pub const Token = struct {
         builtin_va_arg,
         builtin_offsetof,
 
+        /// special token to indicate non-UTF8 input. Triggers a fatal error
+        invalid_utf8,
+
         /// Return true if token is identifier or keyword.
         pub fn isMacroIdentifier(id: Id) bool {
             switch (id) {
@@ -618,6 +621,7 @@ pub const Token = struct {
                 .keyword_int16_2 => "_int16",
                 .keyword_int8 => "__int8",
                 .keyword_int8_2 => "_int8",
+                .invalid_utf8 => unreachable,
             };
         }
 
@@ -904,6 +908,16 @@ source: Source.Id,
 comp: *const Compilation,
 line: u32 = 1,
 
+fn invalidUTF8(self: *const Tokenizer) Token {
+    return .{
+        .id = .invalid_utf8,
+        .start = self.index,
+        .end = self.index,
+        .line = self.line,
+        .source = self.source,
+    };
+}
+
 pub fn next(self: *Tokenizer) Token {
     var state: enum {
         start,
@@ -979,14 +993,13 @@ pub fn next(self: *Tokenizer) Token {
     var counter: u32 = 0;
     var codepoint_len: u3 = undefined;
     while (self.index < self.buf.len) : (self.index += codepoint_len) {
-        // Source files get checked for valid utf-8 before being tokenized so it is safe to use
-        // these versions.
-        codepoint_len = unicode.utf8ByteSequenceLength_unsafe(self.buf[self.index]);
+        codepoint_len = std.unicode.utf8ByteSequenceLength(self.buf[self.index]) catch return self.invalidUTF8();
+        if (self.index + codepoint_len > self.buf.len) return self.invalidUTF8();
         const c: u21 = switch (codepoint_len) {
             1 => @as(u21, self.buf[self.index]),
-            2 => unicode.utf8Decode2_unsafe(self.buf[self.index..]),
-            3 => unicode.utf8Decode3_unsafe(self.buf[self.index..]),
-            4 => unicode.utf8Decode4_unsafe(self.buf[self.index..]),
+            2 => std.unicode.utf8Decode2(self.buf[self.index .. self.index + 2]) catch return self.invalidUTF8(),
+            3 => std.unicode.utf8Decode3(self.buf[self.index .. self.index + 3]) catch return self.invalidUTF8(),
+            4 => std.unicode.utf8Decode4(self.buf[self.index .. self.index + 4]) catch return self.invalidUTF8(),
             else => unreachable,
         };
         switch (state) {
