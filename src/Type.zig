@@ -883,7 +883,10 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
 
         .long_long, .ulong_long, .complex_long_long, .complex_ulong_long => switch (comp.target.cpu.arch) {
             .msp430 => 2,
-            .i386 => 4,
+            .i386 => switch (comp.target.os.tag) {
+                .windows, .uefi => 8,
+                else => 4,
+            },
             else => 8,
         },
         .int128, .uint128, .complex_int128, .complex_uint128 => 16,
@@ -891,12 +894,18 @@ pub fn alignof(ty: Type, comp: *const Compilation) u29 {
         .float, .complex_float => if (comp.target.cpu.arch == .msp430) @as(u29, 2) else 4,
         .double, .complex_double => switch (comp.target.cpu.arch) {
             .msp430 => 2,
-            .i386 => 4,
+            .i386 => switch (comp.target.os.tag) {
+                .windows, .uefi => 8,
+                else => 4,
+            },
             else => 8,
         },
         .long_double, .complex_long_double => switch (comp.target.cpu.arch) {
             .msp430 => 2,
-            .i386 => 4,
+            .i386 => switch (comp.target.os.tag) {
+                .windows, .uefi => 8,
+                else => 4,
+            },
             else => 16,
         },
         .float80, .complex_float80, .float128, .complex_float128 => 16,
