@@ -256,8 +256,8 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
     } else {
         var m = aro.Diagnostics.defaultMsgWriter(&comp);
         defer m.deinit();
-        var expectedErrors = false;
-        var newError = false;
+        var expected_errors = false;
+        var new_error = false;
         for (comp.diag.list.items) |msg| {
             switch (msg.kind) {
                 .@"fatal error", .@"error" => {},
@@ -269,25 +269,25 @@ fn singleRun(alloc: std.mem.Allocator, path: []const u8, source: []const u8, tes
             if (std.ascii.indexOfIgnoreCase(line, "_Static_assert") != null) {
                 if (std.ascii.indexOfIgnoreCase(line, "_extra_") != null) {
                     // MSVC _extra_ tests are all assumed to fail atm.
-                    if (comp.langopts.emulate == .msvc or expected.extra) expectedErrors = true else render = true;
+                    if (comp.langopts.emulate == .msvc or expected.extra) expected_errors = true else render = true;
                 } else if (std.ascii.indexOfIgnoreCase(line, "_bitoffsetof") != null) {
-                    if (!expected.offset) render = true else expectedErrors = true;
+                    if (!expected.offset) render = true else expected_errors = true;
                 } else if (std.ascii.indexOfIgnoreCase(line, "sizeof") != null or
                     std.ascii.indexOfIgnoreCase(line, "_alignof") != null)
                 {
-                    if (!expected.layout) render = true else expectedErrors = true;
+                    if (!expected.layout) render = true else expected_errors = true;
                 } else unreachable;
-            } else if (!expected.parse) render = true else expectedErrors = true;
+            } else if (!expected.parse) render = true else expected_errors = true;
 
             if (render) {
-                if (!newError) m.print("\n", .{});
+                if (!new_error) m.print("\n", .{});
                 aro.Diagnostics.renderExtraItem(&comp, &m, msg);
-                newError = true;
+                new_error = true;
             }
         }
-        if (newError) {
+        if (new_error) {
             state.fail_count += 1;
-        } else if (expectedErrors == true) {
+        } else if (expected_errors) {
             state.skip_count += 1;
         } else {
             state.ok_count += 1;
