@@ -981,54 +981,53 @@ fn ignoredAttrErr(p: *Parser, tok: TokenIndex, attr: Attribute.Tag, context: []c
 
 pub const applyParameterAttributes = applyVariableAttributes;
 pub fn applyVariableAttributes(p: *Parser, ty: Type, attr_buf_start: usize, tag: ?Diagnostics.Tag) !Type {
-    const attrs = p.attr_buf.items(.attr)[attr_buf_start..];
-    const toks = p.attr_buf.items(.tok)[attr_buf_start..];
+    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
     p.attr_application_buf.items.len = 0;
     var base_ty = ty;
     if (base_ty.specifier == .attributed) base_ty = base_ty.data.attributed.base;
     var common = false;
     var nocommon = false;
-    for (attrs) |attr, i| switch (attr.tag) {
+    for (tentative_attrs) |tentative_attr| switch (tentative_attr.attr.tag) {
         // zig fmt: off
         .alias, .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned, .weak, .used,
         .noinit, .retain, .persistent, .section, .mode, .asm_label,
-         => try p.attr_application_buf.append(p.gpa, attr),
+         => try p.attr_application_buf.append(p.gpa, tentative_attr.attr),
         // zig fmt: on
         .common => if (nocommon) {
-            try p.errTok(.ignore_common, toks[i]);
+            try p.errTok(.ignore_common, tentative_attr.tok);
         } else {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
             common = true;
         },
         .nocommon => if (common) {
-            try p.errTok(.ignore_nocommon, toks[i]);
+            try p.errTok(.ignore_nocommon, tentative_attr.tok);
         } else {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
             nocommon = true;
         },
-        .vector_size => try attr.applyVectorSize(p, toks[i], &base_ty),
-        .aligned => try attr.applyAligned(p, base_ty, tag),
+        .vector_size => try tentative_attr.attr.applyVectorSize(p, tentative_attr.tok, &base_ty),
+        .aligned => try tentative_attr.attr.applyAligned(p, base_ty, tag),
         .nonstring => if (!base_ty.isArray() or !(base_ty.is(.char) or base_ty.is(.uchar) or base_ty.is(.schar))) {
-            try p.errStr(.non_string_ignored, toks[i], try p.typeStr(ty));
+            try p.errStr(.non_string_ignored, tentative_attr.tok, try p.typeStr(ty));
         } else {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
         },
         .uninitialized => if (p.func.ty == null) {
-            try p.errStr(.local_variable_attribute, toks[i], "uninitialized");
+            try p.errStr(.local_variable_attribute, tentative_attr.tok, "uninitialized");
         } else {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
         },
         .cleanup => if (p.func.ty == null) {
-            try p.errStr(.local_variable_attribute, toks[i], "cleanup");
+            try p.errStr(.local_variable_attribute, tentative_attr.tok, "cleanup");
         } else {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
         },
         .alloc_size,
         .copy,
         .tls_model,
         .visibility,
-        => std.debug.panic("apply variable attribute {s}", .{@tagName(attr.tag)}),
-        else => try ignoredAttrErr(p, toks[i], attr.tag, "variables"),
+        => std.debug.panic("apply variable attribute {s}", .{@tagName(tentative_attr.attr.tag)}),
+        else => try ignoredAttrErr(p, tentative_attr.tok, tentative_attr.attr.tag, "variables"),
     };
     const existing = ty.getAttributes();
     if (existing.len == 0 and p.attr_application_buf.items.len == 0) return base_ty;
@@ -1039,47 +1038,45 @@ pub fn applyVariableAttributes(p: *Parser, ty: Type, attr_buf_start: usize, tag:
 }
 
 pub fn applyFieldAttributes(p: *Parser, field_ty: *Type, attr_buf_start: usize) ![]const Attribute {
-    const attrs = p.attr_buf.items(.attr)[attr_buf_start..];
-    const toks = p.attr_buf.items(.tok)[attr_buf_start..];
+    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
     p.attr_application_buf.items.len = 0;
-    for (attrs) |attr, i| switch (attr.tag) {
+    for (tentative_attrs) |tentative_attr| switch (tentative_attr.attr.tag) {
         // zig fmt: off
         .@"packed", .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned, .mode,
-        => try p.attr_application_buf.append(p.gpa, attr),
+        => try p.attr_application_buf.append(p.gpa, tentative_attr.attr),
         // zig fmt: on
-        .vector_size => try attr.applyVectorSize(p, toks[i], field_ty),
-        .aligned => try attr.applyAligned(p, field_ty.*, null),
-        else => try ignoredAttrErr(p, toks[i], attr.tag, "fields"),
+        .vector_size => try tentative_attr.attr.applyVectorSize(p, tentative_attr.tok, field_ty),
+        .aligned => try tentative_attr.attr.applyAligned(p, field_ty.*, null),
+        else => try ignoredAttrErr(p, tentative_attr.tok, tentative_attr.attr.tag, "fields"),
     };
     if (p.attr_application_buf.items.len == 0) return &[0]Attribute{};
     return p.arena.dupe(Attribute, p.attr_application_buf.items);
 }
 
 pub fn applyTypeAttributes(p: *Parser, ty: Type, attr_buf_start: usize, tag: ?Diagnostics.Tag) !Type {
-    const attrs = p.attr_buf.items(.attr)[attr_buf_start..];
-    const toks = p.attr_buf.items(.tok)[attr_buf_start..];
+    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
     p.attr_application_buf.items.len = 0;
     var base_ty = ty;
     if (base_ty.specifier == .attributed) base_ty = base_ty.data.attributed.base;
-    for (attrs) |attr, i| switch (attr.tag) {
+    for (tentative_attrs) |tentative_attr| switch (tentative_attr.attr.tag) {
         // zig fmt: off
         .@"packed", .may_alias, .deprecated, .unavailable, .unused, .warn_if_not_aligned, .mode,
-         => try p.attr_application_buf.append(p.gpa, attr),
+         => try p.attr_application_buf.append(p.gpa, tentative_attr.attr),
         // zig fmt: on
-        .transparent_union => try attr.applyTransparentUnion(p, toks[i], base_ty),
-        .vector_size => try attr.applyVectorSize(p, toks[i], &base_ty),
-        .aligned => try attr.applyAligned(p, base_ty, tag),
+        .transparent_union => try tentative_attr.attr.applyTransparentUnion(p, tentative_attr.tok, base_ty),
+        .vector_size => try tentative_attr.attr.applyVectorSize(p, tentative_attr.tok, &base_ty),
+        .aligned => try tentative_attr.attr.applyAligned(p, base_ty, tag),
         .designated_init => if (base_ty.is(.@"struct")) {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
         } else {
-            try p.errTok(.designated_init_invalid, toks[i]);
+            try p.errTok(.designated_init_invalid, tentative_attr.tok);
         },
         .alloc_size,
         .copy,
         .scalar_storage_order,
         .nonstring,
-        => std.debug.panic("apply type attribute {s}", .{@tagName(attr.tag)}),
-        else => try ignoredAttrErr(p, toks[i], attr.tag, "types"),
+        => std.debug.panic("apply type attribute {s}", .{@tagName(tentative_attr.attr.tag)}),
+        else => try ignoredAttrErr(p, tentative_attr.tok, tentative_attr.attr.tag, "types"),
     };
 
     const existing = ty.getAttributes();
@@ -1097,8 +1094,7 @@ pub fn applyTypeAttributes(p: *Parser, ty: Type, attr_buf_start: usize, tag: ?Di
 }
 
 pub fn applyFunctionAttributes(p: *Parser, ty: Type, attr_buf_start: usize) !Type {
-    const attrs = p.attr_buf.items(.attr)[attr_buf_start..];
-    const toks = p.attr_buf.items(.tok)[attr_buf_start..];
+    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
     p.attr_application_buf.items.len = 0;
     var base_ty = ty;
     if (base_ty.specifier == .attributed) base_ty = base_ty.data.attributed.base;
@@ -1106,39 +1102,39 @@ pub fn applyFunctionAttributes(p: *Parser, ty: Type, attr_buf_start: usize) !Typ
     var cold = false;
     var @"noinline" = false;
     var always_inline = false;
-    for (attrs) |attr, i| switch (attr.tag) {
+    for (tentative_attrs) |tentative_attr| switch (tentative_attr.attr.tag) {
         // zig fmt: off
         .noreturn, .unused, .used, .warning, .deprecated, .unavailable, .weak, .pure, .leaf,
         .@"const", .warn_unused_result, .section, .returns_nonnull, .returns_twice, .@"error",
         .externally_visible, .retain, .flatten, .gnu_inline, .alias, .asm_label, .nodiscard,
-         => try p.attr_application_buf.append(p.gpa, attr),
+         => try p.attr_application_buf.append(p.gpa, tentative_attr.attr),
         // zig fmt: on
         .hot => if (cold) {
-            try p.errTok(.ignore_hot, toks[i]);
+            try p.errTok(.ignore_hot, tentative_attr.tok);
         } else {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
             hot = true;
         },
         .cold => if (hot) {
-            try p.errTok(.ignore_cold, toks[i]);
+            try p.errTok(.ignore_cold, tentative_attr.tok);
         } else {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
             cold = true;
         },
         .always_inline => if (@"noinline") {
-            try p.errTok(.ignore_always_inline, toks[i]);
+            try p.errTok(.ignore_always_inline, tentative_attr.tok);
         } else {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
             always_inline = true;
         },
         .@"noinline" => if (always_inline) {
-            try p.errTok(.ignore_noinline, toks[i]);
+            try p.errTok(.ignore_noinline, tentative_attr.tok);
         } else {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
             @"noinline" = true;
         },
-        .aligned => try attr.applyAligned(p, base_ty, null),
-        .format => try attr.applyFormat(p, base_ty),
+        .aligned => try tentative_attr.attr.applyAligned(p, base_ty, null),
+        .format => try tentative_attr.attr.applyFormat(p, base_ty),
         .access,
         .alloc_align,
         .alloc_size,
@@ -1180,62 +1176,59 @@ pub fn applyFunctionAttributes(p: *Parser, ty: Type, attr_buf_start: usize) !Typ
         .visibility,
         .weakref,
         .zero_call_used_regs,
-        => std.debug.panic("apply type attribute {s}", .{@tagName(attr.tag)}),
-        else => try ignoredAttrErr(p, toks[i], attr.tag, "functions"),
+        => std.debug.panic("apply type attribute {s}", .{@tagName(tentative_attr.attr.tag)}),
+        else => try ignoredAttrErr(p, tentative_attr.tok, tentative_attr.attr.tag, "functions"),
     };
     return ty.withAttributes(p.arena, p.attr_application_buf.items);
 }
 
 pub fn applyLabelAttributes(p: *Parser, ty: Type, attr_buf_start: usize) !Type {
-    const attrs = p.attr_buf.items(.attr)[attr_buf_start..];
-    const toks = p.attr_buf.items(.tok)[attr_buf_start..];
+    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
     p.attr_application_buf.items.len = 0;
     var hot = false;
     var cold = false;
-    for (attrs) |attr, i| switch (attr.tag) {
-        .unused => try p.attr_application_buf.append(p.gpa, attr),
+    for (tentative_attrs) |tentative_attr| switch (tentative_attr.attr.tag) {
+        .unused => try p.attr_application_buf.append(p.gpa, tentative_attr.attr),
         .hot => if (cold) {
-            try p.errTok(.ignore_hot, toks[i]);
+            try p.errTok(.ignore_hot, tentative_attr.tok);
         } else {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
             hot = true;
         },
         .cold => if (hot) {
-            try p.errTok(.ignore_cold, toks[i]);
+            try p.errTok(.ignore_cold, tentative_attr.tok);
         } else {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
             cold = true;
         },
-        else => try ignoredAttrErr(p, toks[i], attr.tag, "labels"),
+        else => try ignoredAttrErr(p, tentative_attr.tok, tentative_attr.attr.tag, "labels"),
     };
     return ty.withAttributes(p.arena, p.attr_application_buf.items);
 }
 
 pub fn applyStatementAttributes(p: *Parser, ty: Type, expr_start: TokenIndex, attr_buf_start: usize) !Type {
-    const attrs = p.attr_buf.items(.attr)[attr_buf_start..];
-    const toks = p.attr_buf.items(.tok)[attr_buf_start..];
+    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
     p.attr_application_buf.items.len = 0;
-    for (attrs) |attr, i| switch (attr.tag) {
+    for (tentative_attrs) |tentative_attr| switch (tentative_attr.attr.tag) {
         .fallthrough => if (p.tok_ids[p.tok_i] != .keyword_case and p.tok_ids[p.tok_i] != .keyword_default) {
             // TODO: this condition is not completely correct; the last statement of a compound
             // statement is also valid if it precedes a switch label (so intervening '}' are ok,
             // but only if they close a compound statement)
             try p.errTok(.invalid_fallthrough, expr_start);
         } else {
-            try p.attr_application_buf.append(p.gpa, attr);
+            try p.attr_application_buf.append(p.gpa, tentative_attr.attr);
         },
-        else => try p.errStr(.cannot_apply_attribute_to_statement, toks[i], @tagName(attr.tag)),
+        else => try p.errStr(.cannot_apply_attribute_to_statement, tentative_attr.tok, @tagName(tentative_attr.attr.tag)),
     };
     return ty.withAttributes(p.arena, p.attr_application_buf.items);
 }
 
 pub fn applyEnumeratorAttributes(p: *Parser, ty: Type, attr_buf_start: usize) !Type {
-    const attrs = p.attr_buf.items(.attr)[attr_buf_start..];
-    const toks = p.attr_buf.items(.tok)[attr_buf_start..];
+    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
     p.attr_application_buf.items.len = 0;
-    for (attrs) |attr, i| switch (attr.tag) {
-        .deprecated, .unavailable => try p.attr_application_buf.append(p.gpa, attr),
-        else => try ignoredAttrErr(p, toks[i], attr.tag, "enums"),
+    for (tentative_attrs) |tentative_attr| switch (tentative_attr.attr.tag) {
+        .deprecated, .unavailable => try p.attr_application_buf.append(p.gpa, tentative_attr.attr),
+        else => try ignoredAttrErr(p, tentative_attr.tok, tentative_attr.attr.tag, "enums"),
     };
     return ty.withAttributes(p.arena, p.attr_application_buf.items);
 }

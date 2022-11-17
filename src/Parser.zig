@@ -108,7 +108,7 @@ decl_buf: NodeList,
 param_buf: std.ArrayList(Type.Func.Param),
 enum_buf: std.ArrayList(Type.Enum.Field),
 record_buf: std.ArrayList(Type.Record.Field),
-attr_buf: std.MultiArrayList(TentativeAttribute) = .{},
+attr_buf: std.ArrayList(TentativeAttribute),
 attr_application_buf: std.ArrayListUnmanaged(Attribute) = .{},
 field_attr_buf: std.ArrayList([]const Attribute),
 
@@ -529,6 +529,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!Tree {
         .param_buf = std.ArrayList(Type.Func.Param).init(pp.comp.gpa),
         .enum_buf = std.ArrayList(Type.Enum.Field).init(pp.comp.gpa),
         .record_buf = std.ArrayList(Type.Record.Field).init(pp.comp.gpa),
+        .attr_buf = std.ArrayList(TentativeAttribute).init(pp.comp.gpa),
         .field_attr_buf = std.ArrayList([]const Attribute).init(pp.comp.gpa),
         .string_ids = .{
             .declspec_id = try pp.comp.intern("__declspec"),
@@ -550,7 +551,7 @@ pub fn parse(pp: *Preprocessor) Compilation.Error!Tree {
         p.enum_buf.deinit();
         p.record_buf.deinit();
         p.record_members.deinit(pp.comp.gpa);
-        p.attr_buf.deinit(pp.comp.gpa);
+        p.attr_buf.deinit();
         p.attr_application_buf.deinit(pp.comp.gpa);
         assert(p.field_attr_buf.items.len == 0);
         p.field_attr_buf.deinit();
@@ -730,8 +731,8 @@ fn skipTo(p: *Parser, id: Token.Id) void {
 fn decl(p: *Parser) Error!bool {
     _ = try p.pragma();
     const first_tok = p.tok_i;
-    const attr_buf_top = p.attr_buf.len;
-    defer p.attr_buf.len = attr_buf_top;
+    const attr_buf_top = p.attr_buf.items.len;
+    defer p.attr_buf.items.len = attr_buf_top;
 
     var decl_spec = if (try p.declSpec()) |some| some else blk: {
         if (p.func.ty != null) {
@@ -750,7 +751,7 @@ fn decl(p: *Parser) Error!bool {
     };
     if (decl_spec.@"noreturn") |tok| {
         const attr = Attribute{ .tag = .noreturn, .args = .{ .noreturn = {} }, .syntax = .keyword };
-        try p.attr_buf.append(p.gpa, .{ .attr = attr, .tok = tok });
+        try p.attr_buf.append(.{ .attr = attr, .tok = tok });
     }
     var init_d = (try p.initDeclarator(&decl_spec, attr_buf_top)) orelse {
         _ = try p.expectToken(.semicolon);
@@ -759,11 +760,10 @@ fn decl(p: *Parser) Error!bool {
             !decl_spec.ty.isTypeof())) // we follow GCC and clang's behavior here
         {
             const specifier = decl_spec.ty.canonicalize(.standard).specifier;
-            const attrs = p.attr_buf.items(.attr)[attr_buf_top..];
-            const toks = p.attr_buf.items(.tok)[attr_buf_top..];
-            for (attrs) |attr, i| {
-                try p.errExtra(.ignored_record_attr, toks[i], .{
-                    .ignored_record_attr = .{ .tag = attr.tag, .specifier = switch (specifier) {
+            const tentative_attrs = p.attr_buf.items[attr_buf_top..];
+            for (tentative_attrs) |tentative_attr| {
+                try p.errExtra(.ignored_record_attr, tentative_attr.tok, .{
+                    .ignored_record_attr = .{ .tag = tentative_attr.attr.tag, .specifier = switch (specifier) {
                         .@"enum" => .@"enum",
                         .@"struct" => .@"struct",
                         .@"union" => .@"union",
@@ -825,8 +825,8 @@ fn decl(p: *Parser) Error!bool {
                 }
 
                 while (true) {
-                    const attr_buf_top_declarator = p.attr_buf.len;
-                    defer p.attr_buf.len = attr_buf_top_declarator;
+                    const attr_buf_top_declarator = p.attr_buf.items.len;
+                    defer p.attr_buf.items.len = attr_buf_top_declarator;
 
                     var d = (try p.declarator(param_decl_spec.ty, .normal)) orelse {
                         try p.errTok(.missing_declaration, first_tok);
@@ -1326,10 +1326,10 @@ fn diagnose(p: *Parser, attr: Attribute.Tag, arguments: *Attribute.Arguments, ar
 fn gnuAttributeList(p: *Parser) Error!void {
     if (p.tok_ids[p.tok_i] == .r_paren) return;
 
-    if (try p.attribute(.gnu, null)) |attr| try p.attr_buf.append(p.gpa, attr);
+    if (try p.attribute(.gnu, null)) |attr| try p.attr_buf.append(attr);
     while (p.tok_ids[p.tok_i] != .r_paren) {
         _ = try p.expectToken(.comma);
-        if (try p.attribute(.gnu, null)) |attr| try p.attr_buf.append(p.gpa, attr);
+        if (try p.attribute(.gnu, null)) |attr| try p.attr_buf.append(attr);
     }
 }
 
@@ -1342,14 +1342,14 @@ fn c2xAttributeList(p: *Parser) Error!void {
         } else {
             p.tok_i -= 1;
         }
-        if (try p.attribute(.c2x, namespace)) |attr| try p.attr_buf.append(p.gpa, attr);
+        if (try p.attribute(.c2x, namespace)) |attr| try p.attr_buf.append(attr);
         _ = p.eatToken(.comma);
     }
 }
 
 fn msvcAttributeList(p: *Parser) Error!void {
     while (p.tok_ids[p.tok_i] != .r_paren) {
-        if (try p.attribute(.declspec, null)) |attr| try p.attr_buf.append(p.gpa, attr);
+        if (try p.attribute(.declspec, null)) |attr| try p.attr_buf.append(attr);
         _ = p.eatToken(.comma);
     }
 }
@@ -1404,12 +1404,12 @@ fn attributeSpecifierExtra(p: *Parser, declarator_name: ?TokenIndex) Error!void 
         if (try p.gnuAttribute()) continue;
         if (try p.c2xAttribute()) continue;
         const maybe_declspec_tok = p.tok_i;
-        const attr_buf_top = p.attr_buf.len;
+        const attr_buf_top = p.attr_buf.items.len;
         if (try p.msvcAttribute()) {
             if (declarator_name) |name_tok| {
                 try p.errTok(.declspec_not_allowed_after_declarator, maybe_declspec_tok);
                 try p.errTok(.declarator_name_tok, name_tok);
-                p.attr_buf.len = attr_buf_top;
+                p.attr_buf.items.len = attr_buf_top;
             }
             continue;
         }
@@ -1419,8 +1419,8 @@ fn attributeSpecifierExtra(p: *Parser, declarator_name: ?TokenIndex) Error!void 
 
 /// initDeclarator : declarator assembly? attributeSpecifier? ('=' initializer)?
 fn initDeclarator(p: *Parser, decl_spec: *DeclSpec, attr_buf_top: usize) Error!?InitDeclarator {
-    const this_attr_buf_top = p.attr_buf.len;
-    defer p.attr_buf.len = this_attr_buf_top;
+    const this_attr_buf_top = p.attr_buf.items.len;
+    defer p.attr_buf.items.len = this_attr_buf_top;
 
     var init_d = InitDeclarator{
         .d = (try p.declarator(decl_spec.ty, .normal)) orelse return null,
@@ -1582,7 +1582,7 @@ fn typeSpec(p: *Parser, ty: *Type.Builder) Error!bool {
                         try p.errStr(.invalid_alignof, typename_start, try p.typeStr(inner_ty));
                     }
                     const alignment = Attribute.Alignment{ .requested = inner_ty.alignof(p.comp) };
-                    try p.attr_buf.append(p.gpa, .{
+                    try p.attr_buf.append(.{
                         .attr = .{ .tag = .aligned, .args = .{
                             .aligned = .{ .alignment = alignment, .__name_tok = align_tok },
                         }, .syntax = .keyword },
@@ -1599,7 +1599,7 @@ fn typeSpec(p: *Parser, ty: *Type.Builder) Error!bool {
                             return error.ParsingFailed;
                         }
                         args.aligned.alignment.?.node = res.node;
-                        try p.attr_buf.append(p.gpa, .{
+                        try p.attr_buf.append(.{
                             .attr = .{ .tag = .aligned, .args = args, .syntax = .keyword },
                             .tok = align_tok,
                         });
@@ -1674,8 +1674,8 @@ fn recordSpec(p: *Parser) Error!Type {
     const kind_tok = p.tok_i;
     const is_struct = p.tok_ids[kind_tok] == .keyword_struct;
     p.tok_i += 1;
-    const attr_buf_top = p.attr_buf.len;
-    defer p.attr_buf.len = attr_buf_top;
+    const attr_buf_top = p.attr_buf.items.len;
+    defer p.attr_buf.items.len = attr_buf_top;
     try p.attributeSpecifier();
 
     const maybe_ident = try p.eatIdentifier();
@@ -1864,14 +1864,14 @@ fn recordDecls(p: *Parser) Error!void {
 
 /// recordDeclarator : keyword_extension? declarator (':' constExpr)?
 fn recordDeclarator(p: *Parser) Error!bool {
-    const attr_buf_top = p.attr_buf.len;
-    defer p.attr_buf.len = attr_buf_top;
+    const attr_buf_top = p.attr_buf.items.len;
+    defer p.attr_buf.items.len = attr_buf_top;
     const base_ty = (try p.specQual()) orelse return false;
 
     try p.attributeSpecifier(); // .record
     while (true) {
-        const this_decl_top = p.attr_buf.len;
-        defer p.attr_buf.len = this_decl_top;
+        const this_decl_top = p.attr_buf.items.len;
+        defer p.attr_buf.items.len = this_decl_top;
 
         try p.attributeSpecifier();
 
@@ -2011,8 +2011,8 @@ fn specQual(p: *Parser) Error!?Type {
 fn enumSpec(p: *Parser) Error!Type {
     const enum_tok = p.tok_i;
     p.tok_i += 1;
-    const attr_buf_top = p.attr_buf.len;
-    defer p.attr_buf.len = attr_buf_top;
+    const attr_buf_top = p.attr_buf.items.len;
+    defer p.attr_buf.items.len = attr_buf_top;
     try p.attributeSpecifier();
 
     const maybe_ident = try p.eatIdentifier();
@@ -2316,8 +2316,8 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
         p.skipTo(.r_brace);
         return error.ParsingFailed;
     };
-    const attr_buf_top = p.attr_buf.len;
-    defer p.attr_buf.len = attr_buf_top;
+    const attr_buf_top = p.attr_buf.items.len;
+    defer p.attr_buf.items.len = attr_buf_top;
     try p.attributeSpecifier();
 
     const err_start = p.comp.diag.list.items.len;
@@ -2682,8 +2682,8 @@ fn paramDecls(p: *Parser) Error!?[]Type.Func.Param {
     defer p.syms.popScope();
 
     while (true) {
-        const attr_buf_top = p.attr_buf.len;
-        defer p.attr_buf.len = attr_buf_top;
+        const attr_buf_top = p.attr_buf.items.len;
+        defer p.attr_buf.items.len = attr_buf_top;
         const param_decl_spec = if (try p.declSpec()) |some|
             some
         else if (p.param_buf.items.len == param_buf_top)
@@ -2749,8 +2749,8 @@ fn paramDecls(p: *Parser) Error!?[]Type.Func.Param {
 
 /// typeName : specQual abstractDeclarator
 fn typeName(p: *Parser) Error!?Type {
-    const attr_buf_top = p.attr_buf.len;
-    defer p.attr_buf.len = attr_buf_top;
+    const attr_buf_top = p.attr_buf.items.len;
+    defer p.attr_buf.items.len = attr_buf_top;
     var ty = (try p.specQual()) orelse return null;
     if (try p.declarator(ty, .abstract)) |some| {
         if (some.old_style_func) |tok_i| try p.errTok(.invalid_old_style_params, tok_i);
@@ -3384,7 +3384,7 @@ fn assembly(p: *Parser, kind: enum { global, decl_label, stmt }) Error!?NodeInde
         .decl_label => {
             const str = (try p.asmStr()).val.data.bytes;
             const attr = Attribute{ .tag = .asm_label, .args = .{ .asm_label = .{ .name = str[0 .. str.len - 1] } }, .syntax = .keyword };
-            try p.attr_buf.append(p.gpa, .{ .attr = attr, .tok = asm_tok });
+            try p.attr_buf.append(.{ .attr = attr, .tok = asm_tok });
         },
         .global => _ = try p.asmStr(),
         .stmt => return p.todo("assembly statements"),
@@ -3674,8 +3674,8 @@ fn stmt(p: *Parser) Error!NodeIndex {
         return e.node;
     }
 
-    const attr_buf_top = p.attr_buf.len;
-    defer p.attr_buf.len = attr_buf_top;
+    const attr_buf_top = p.attr_buf.items.len;
+    defer p.attr_buf.items.len = attr_buf_top;
     try p.attributeSpecifier();
 
     if (p.eatToken(.semicolon)) |_| {
@@ -3713,8 +3713,8 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
         }
 
         p.tok_i += 1;
-        const attr_buf_top = p.attr_buf.len;
-        defer p.attr_buf.len = attr_buf_top;
+        const attr_buf_top = p.attr_buf.items.len;
+        defer p.attr_buf.items.len = attr_buf_top;
         try p.attributeSpecifier();
 
         var labeled_stmt = Tree.Node{
