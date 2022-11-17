@@ -733,8 +733,6 @@ fn decl(p: *Parser) Error!bool {
     const attr_buf_top = p.attr_buf.len;
     defer p.attr_buf.len = attr_buf_top;
 
-    try p.attributeSpecifier();
-
     var decl_spec = if (try p.declSpec()) |some| some else blk: {
         if (p.func.ty != null) {
             p.tok_i = first_tok;
@@ -1171,6 +1169,8 @@ fn typeof(p: *Parser) Error!?Type {
 fn declSpec(p: *Parser) Error!?DeclSpec {
     var d: DeclSpec = .{ .ty = .{ .specifier = undefined } };
     var spec: Type.Builder = .{};
+
+    try p.attributeSpecifier();
 
     const start = p.tok_i;
     while (true) {
