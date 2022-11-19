@@ -15,6 +15,7 @@ const Diagnostics = @import("Diagnostics.zig");
 const NodeList = std.ArrayList(NodeIndex);
 const InitList = @import("InitList.zig");
 const Attribute = @import("Attribute.zig");
+const TentativeAttribute = Attribute.TentativeAttribute;
 const CharInfo = @import("CharInfo.zig");
 const Value = @import("Value.zig");
 const SymbolStack = @import("SymbolStack.zig");
@@ -66,12 +67,6 @@ const Label = union(enum) {
 };
 
 pub const Error = Compilation.Error || error{ParsingFailed};
-
-/// An attribute that has been parsed but not yet validated in its context
-const TentativeAttribute = struct {
-    attr: Attribute,
-    tok: TokenIndex,
-};
 
 /// How the parser handles const int decl references when it is expecting an integer
 /// constant expression.
@@ -863,7 +858,7 @@ fn decl(p: *Parser) Error!bool {
                     } else {
                         try p.errStr(.parameter_missing, d.name, name_str);
                     }
-                    d.ty = try Attribute.applyParameterAttributes(p, d.ty, attr_buf_top_declarator, .alignas_on_param);
+                    d.ty = try Attribute.applyParameterAttributes(p, d.ty, p.attr_buf.items[attr_buf_top_declarator..], .alignas_on_param);
 
                     // bypass redefinition check to avoid duplicate errors
                     try p.syms.syms.append(p.gpa, .{
@@ -1431,11 +1426,11 @@ fn initDeclarator(p: *Parser, decl_spec: *DeclSpec, attr_buf_top: usize) Error!?
     try p.attributeSpecifierExtra(init_d.d.name);
 
     if (decl_spec.storage_class == .typedef) {
-        init_d.d.ty = try Attribute.applyTypeAttributes(p, init_d.d.ty, attr_buf_top, null);
+        init_d.d.ty = try Attribute.applyTypeAttributes(p, init_d.d.ty, p.attr_buf.items[attr_buf_top..], null);
     } else if (init_d.d.ty.isFunc()) {
-        init_d.d.ty = try Attribute.applyFunctionAttributes(p, init_d.d.ty, attr_buf_top);
+        init_d.d.ty = try Attribute.applyFunctionAttributes(p, init_d.d.ty, p.attr_buf.items[attr_buf_top..]);
     } else {
-        init_d.d.ty = try Attribute.applyVariableAttributes(p, init_d.d.ty, attr_buf_top, null);
+        init_d.d.ty = try Attribute.applyVariableAttributes(p, init_d.d.ty, p.attr_buf.items[attr_buf_top..], null);
     }
 
     if (p.eatToken(.equal)) |eq| init: {
@@ -1694,7 +1689,7 @@ fn recordSpec(p: *Parser) Error!Type {
             const ty = try Attribute.applyTypeAttributes(p, .{
                 .specifier = if (is_struct) .@"struct" else .@"union",
                 .data = .{ .record = record_ty },
-            }, attr_buf_top, null);
+            }, p.attr_buf.items[attr_buf_top..], null);
             try p.syms.syms.append(p.gpa, .{
                 .kind = if (is_struct) .@"struct" else .@"union",
                 .name = interned_name,
@@ -1805,7 +1800,7 @@ fn recordSpec(p: *Parser) Error!Type {
     ty = try Attribute.applyTypeAttributes(p, .{
         .specifier = if (is_struct) .@"struct" else .@"union",
         .data = .{ .record = record_ty },
-    }, attr_buf_top, null);
+    }, p.attr_buf.items[attr_buf_top..], null);
     if (ty.specifier == .attributed and symbol_index != null) {
         p.syms.syms.items(.ty)[symbol_index.?] = ty;
     }
@@ -1919,7 +1914,7 @@ fn recordDeclarator(p: *Parser) Error!bool {
         }
 
         try p.attributeSpecifier(); // .record
-        const to_append = try Attribute.applyFieldAttributes(p, &ty, attr_buf_top);
+        const to_append = try Attribute.applyFieldAttributes(p, &ty, p.attr_buf.items[attr_buf_top..]);
 
         const any_fields_have_attrs = p.field_attr_buf.items.len > p.record.field_attr_start;
 
@@ -2047,7 +2042,7 @@ fn enumSpec(p: *Parser) Error!Type {
             const ty = try Attribute.applyTypeAttributes(p, .{
                 .specifier = .@"enum",
                 .data = .{ .@"enum" = enum_ty },
-            }, attr_buf_top, null);
+            }, p.attr_buf.items[attr_buf_top..], null);
             try p.syms.syms.append(p.gpa, .{
                 .kind = .@"enum",
                 .name = interned_name,
@@ -2115,7 +2110,7 @@ fn enumSpec(p: *Parser) Error!Type {
     const ty = try Attribute.applyTypeAttributes(p, .{
         .specifier = .@"enum",
         .data = .{ .@"enum" = enum_ty },
-    }, attr_buf_top, null);
+    }, p.attr_buf.items[attr_buf_top..], null);
     if (!enum_ty.fixed) {
         const tag_specifier = try e.getTypeSpecifier(p, ty.enumIsPacked(p.comp), maybe_ident orelse enum_tok);
         enum_ty.tag_ty = .{ .specifier = tag_specifier };
@@ -2334,7 +2329,7 @@ fn enumerator(p: *Parser, e: *Enumerator) Error!?EnumFieldAndNode {
     }
 
     var res = e.res;
-    res.ty = try Attribute.applyEnumeratorAttributes(p, res.ty, attr_buf_top);
+    res.ty = try Attribute.applyEnumeratorAttributes(p, res.ty, p.attr_buf.items[attr_buf_top..]);
 
     if (res.ty.isUnsignedInt(p.comp) or res.val.compare(.gte, Value.int(0), res.ty, p.comp)) {
         e.num_positive_bits = std.math.max(e.num_positive_bits, res.val.minUnsignedBits(res.ty, p.comp));
@@ -2707,7 +2702,7 @@ fn paramDecls(p: *Parser) Error!?[]Type.Func.Param {
                 try p.syms.defineParam(p, interned_name, param_ty, name_tok);
             }
         }
-        param_ty = try Attribute.applyParameterAttributes(p, param_ty, attr_buf_top, .alignas_on_param);
+        param_ty = try Attribute.applyParameterAttributes(p, param_ty, p.attr_buf.items[attr_buf_top..], .alignas_on_param);
 
         if (param_ty.isFunc()) {
             // params declared as functions are converted to function pointers
@@ -2754,9 +2749,9 @@ fn typeName(p: *Parser) Error!?Type {
     var ty = (try p.specQual()) orelse return null;
     if (try p.declarator(ty, .abstract)) |some| {
         if (some.old_style_func) |tok_i| try p.errTok(.invalid_old_style_params, tok_i);
-        return try Attribute.applyTypeAttributes(p, some.ty, attr_buf_top, .align_ignored);
+        return try Attribute.applyTypeAttributes(p, some.ty, p.attr_buf.items[attr_buf_top..], .align_ignored);
     }
-    return try Attribute.applyTypeAttributes(p, ty, attr_buf_top, .align_ignored);
+    return try Attribute.applyTypeAttributes(p, ty, p.attr_buf.items[attr_buf_top..], .align_ignored);
 }
 
 /// initializer
@@ -3680,7 +3675,7 @@ fn stmt(p: *Parser) Error!NodeIndex {
 
     if (p.eatToken(.semicolon)) |_| {
         var null_node: Tree.Node = .{ .tag = .null_stmt, .data = undefined };
-        null_node.ty = try Attribute.applyStatementAttributes(p, null_node.ty, expr_start, attr_buf_top);
+        null_node.ty = try Attribute.applyStatementAttributes(p, null_node.ty, expr_start, p.attr_buf.items[attr_buf_top..]);
         return p.addNode(null_node);
     }
 
@@ -3721,7 +3716,7 @@ fn labeledStmt(p: *Parser) Error!?NodeIndex {
             .tag = .labeled_stmt,
             .data = .{ .decl = .{ .name = name_tok, .node = try p.stmt() } },
         };
-        labeled_stmt.ty = try Attribute.applyLabelAttributes(p, labeled_stmt.ty, attr_buf_top);
+        labeled_stmt.ty = try Attribute.applyLabelAttributes(p, labeled_stmt.ty, p.attr_buf.items[attr_buf_top..]);
         return try p.addNode(labeled_stmt);
     } else if (p.eatToken(.keyword_case)) |case| {
         const first_item = try p.constExpr(.gnu_folding_extension);

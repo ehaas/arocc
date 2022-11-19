@@ -12,6 +12,12 @@ const Value = @import("Value.zig");
 
 const Attribute = @This();
 
+/// An attribute that has been parsed but not yet validated in its context
+pub const TentativeAttribute = struct {
+    attr: Attribute,
+    tok: TokenIndex,
+};
+
 tag: Tag,
 syntax: Syntax,
 args: Arguments,
@@ -980,8 +986,7 @@ fn ignoredAttrErr(p: *Parser, tok: TokenIndex, attr: Attribute.Tag, context: []c
 }
 
 pub const applyParameterAttributes = applyVariableAttributes;
-pub fn applyVariableAttributes(p: *Parser, ty: Type, attr_buf_start: usize, tag: ?Diagnostics.Tag) !Type {
-    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
+pub fn applyVariableAttributes(p: *Parser, ty: Type, tentative_attrs: []const TentativeAttribute, tag: ?Diagnostics.Tag) !Type {
     p.attr_application_buf.items.len = 0;
     var base_ty = ty;
     if (base_ty.specifier == .attributed) base_ty = base_ty.data.attributed.base;
@@ -1037,8 +1042,7 @@ pub fn applyVariableAttributes(p: *Parser, ty: Type, attr_buf_start: usize, tag:
     return Type{ .specifier = .attributed, .data = .{ .attributed = attributed_type } };
 }
 
-pub fn applyFieldAttributes(p: *Parser, field_ty: *Type, attr_buf_start: usize) ![]const Attribute {
-    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
+pub fn applyFieldAttributes(p: *Parser, field_ty: *Type, tentative_attrs: []const TentativeAttribute) ![]const Attribute {
     p.attr_application_buf.items.len = 0;
     for (tentative_attrs) |tentative_attr| switch (tentative_attr.attr.tag) {
         // zig fmt: off
@@ -1053,8 +1057,7 @@ pub fn applyFieldAttributes(p: *Parser, field_ty: *Type, attr_buf_start: usize) 
     return p.arena.dupe(Attribute, p.attr_application_buf.items);
 }
 
-pub fn applyTypeAttributes(p: *Parser, ty: Type, attr_buf_start: usize, tag: ?Diagnostics.Tag) !Type {
-    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
+pub fn applyTypeAttributes(p: *Parser, ty: Type, tentative_attrs: []const TentativeAttribute, tag: ?Diagnostics.Tag) !Type {
     p.attr_application_buf.items.len = 0;
     var base_ty = ty;
     if (base_ty.specifier == .attributed) base_ty = base_ty.data.attributed.base;
@@ -1093,8 +1096,7 @@ pub fn applyTypeAttributes(p: *Parser, ty: Type, attr_buf_start: usize, tag: ?Di
     return base_ty;
 }
 
-pub fn applyFunctionAttributes(p: *Parser, ty: Type, attr_buf_start: usize) !Type {
-    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
+pub fn applyFunctionAttributes(p: *Parser, ty: Type, tentative_attrs: []const TentativeAttribute) !Type {
     p.attr_application_buf.items.len = 0;
     var base_ty = ty;
     if (base_ty.specifier == .attributed) base_ty = base_ty.data.attributed.base;
@@ -1182,8 +1184,7 @@ pub fn applyFunctionAttributes(p: *Parser, ty: Type, attr_buf_start: usize) !Typ
     return ty.withAttributes(p.arena, p.attr_application_buf.items);
 }
 
-pub fn applyLabelAttributes(p: *Parser, ty: Type, attr_buf_start: usize) !Type {
-    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
+pub fn applyLabelAttributes(p: *Parser, ty: Type, tentative_attrs: []const TentativeAttribute) !Type {
     p.attr_application_buf.items.len = 0;
     var hot = false;
     var cold = false;
@@ -1206,8 +1207,7 @@ pub fn applyLabelAttributes(p: *Parser, ty: Type, attr_buf_start: usize) !Type {
     return ty.withAttributes(p.arena, p.attr_application_buf.items);
 }
 
-pub fn applyStatementAttributes(p: *Parser, ty: Type, expr_start: TokenIndex, attr_buf_start: usize) !Type {
-    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
+pub fn applyStatementAttributes(p: *Parser, ty: Type, expr_start: TokenIndex, tentative_attrs: []const TentativeAttribute) !Type {
     p.attr_application_buf.items.len = 0;
     for (tentative_attrs) |tentative_attr| switch (tentative_attr.attr.tag) {
         .fallthrough => if (p.tok_ids[p.tok_i] != .keyword_case and p.tok_ids[p.tok_i] != .keyword_default) {
@@ -1223,8 +1223,7 @@ pub fn applyStatementAttributes(p: *Parser, ty: Type, expr_start: TokenIndex, at
     return ty.withAttributes(p.arena, p.attr_application_buf.items);
 }
 
-pub fn applyEnumeratorAttributes(p: *Parser, ty: Type, attr_buf_start: usize) !Type {
-    const tentative_attrs = p.attr_buf.items[attr_buf_start..];
+pub fn applyEnumeratorAttributes(p: *Parser, ty: Type, tentative_attrs: []const TentativeAttribute) !Type {
     p.attr_application_buf.items.len = 0;
     for (tentative_attrs) |tentative_attr| switch (tentative_attr.attr.tag) {
         .deprecated, .unavailable => try p.attr_application_buf.append(p.gpa, tentative_attr.attr),
