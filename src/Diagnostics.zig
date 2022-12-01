@@ -66,6 +66,8 @@ pub const Options = packed struct {
     extra: Kind = .default,
     pedantic: Kind = .default,
 
+    everything: Kind = .default,
+
     @"unsupported-pragma": Kind = .default,
     @"c99-extensions": Kind = .default,
     @"implicit-int": Kind = .default,
@@ -2441,6 +2443,7 @@ fn tagKind(diag: *Diagnostics, tag: Tag) Kind {
             if (@hasDecl(info, "pedantic")) {
                 if (diag.options.pedantic != .default) kind = diag.options.pedantic;
             }
+            if (diag.options.everything != .default) kind = diag.options.everything;
             if (@hasDecl(info, "opt")) {
                 if (@field(diag.options, info.opt) != .default) kind = @field(diag.options, info.opt);
             }
