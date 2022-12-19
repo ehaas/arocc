@@ -1,6 +1,7 @@
 const std = @import("std");
 const LangOpts = @import("LangOpts.zig");
 const Type = @import("Type.zig");
+const CType = @import("zig").CType;
 
 pub fn getCharSignedness(target: std.Target) std.builtin.Signedness {
     switch (target.cpu.arch) {
@@ -160,6 +161,10 @@ pub fn systemCompiler(target: std.Target) LangOpts.Compiler {
 pub fn hasInt128(target: std.Target) bool {
     if (target.cpu.arch == .wasm32) return true;
     return target.cpu.arch.ptrBitWidth() >= 64;
+}
+
+pub fn isLP64(target: std.Target) bool {
+    return CType.sizeInBits(.int, target) == 32 and CType.ptrBitWidth(target) == 64;
 }
 
 test "alignment functions - smoke test" {
