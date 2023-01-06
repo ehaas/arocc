@@ -1,4 +1,5 @@
 const std = @import("std");
+const fastfilter = @import("deps/fastfilter/build.zig");
 const Builder = std.build.Builder;
 
 fn addFuzzStep(b: *Builder, target: std.zig.CrossTarget) !void {
@@ -79,6 +80,8 @@ pub fn build(b: *Builder) !void {
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.addPackage(zig_pkg);
+    exe.addPackage(fastfilter.pkg);
+
     if (link_libc) {
         exe.linkLibC();
     }
@@ -99,13 +102,14 @@ pub fn build(b: *Builder) !void {
 
     var unit_tests = b.addTest("src/main.zig");
     unit_tests.addPackage(zig_pkg);
+    unit_tests.addPackage(fastfilter.pkg);
     tests_step.dependOn(&unit_tests.step);
 
     const integration_tests = b.addExecutable("arocc", "test/runner.zig");
     integration_tests.addPackage(.{
         .name = "aro",
         .source = .{ .path = "src/lib.zig" },
-        .dependencies = &.{zig_pkg},
+        .dependencies = &.{zig_pkg, fastfilter.pkg},
     });
     const test_runner_options = b.addOptions();
     integration_tests.addOptions("build_options", test_runner_options);
@@ -119,7 +123,7 @@ pub fn build(b: *Builder) !void {
     record_tests.addPackage(.{
         .name = "aro",
         .source = .{ .path = "src/lib.zig" },
-        .dependencies = &.{zig_pkg},
+        .dependencies = &.{zig_pkg, fastfilter.pkg},
     });
     const record_tests_runner = record_tests.run();
     record_tests_runner.addArg(b.pathFromRoot("test/records"));

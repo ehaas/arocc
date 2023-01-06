@@ -7,6 +7,7 @@ const target = @import("target.zig");
 const StringId = @import("StringInterner.zig").StringId;
 const LangOpts = @import("LangOpts.zig");
 const Parser = @import("Parser.zig");
+const fastfilter = @import("fastfilter");
 
 const Builtins = @This();
 
@@ -57,10 +58,12 @@ const NameToIndexMap = std.StringHashMapUnmanaged(Cache.Index);
 
 _name_to_index_map: NameToIndexMap = .{},
 _cache: Cache = .{},
+_filter: fastfilter.BinaryFuse8 = undefined,
 
 pub fn deinit(b: *Builtins, gpa: std.mem.Allocator) void {
     b._name_to_index_map.deinit(gpa);
     b._cache.deinit(gpa);
+    b._filter.deinit(gpa);
 }
 
 fn specForSize(comp: *const Compilation, size_bits: u32) Type.Builder.Specifier {
@@ -277,6 +280,27 @@ fn createBuiltin(comp: *const Compilation, builtin: BuiltinFunction, type_arena:
     };
 }
 
+pub fn create(comp: *Compilation) !Builtins {    
+    const size = @typeInfo(BuiltinFunction.Tag).Enum.fields.len;
+
+    var filter = try fastfilter.BinaryFuse8.init(comp.gpa, size);
+    errdefer filter.deinit(comp.gpa);
+    
+    var keys: [size]u64 = undefined;
+    var i: usize = 0;
+    while (i < size) : (i += 1) {
+        const tag = @intToEnum(BuiltinFunction.Tag, i);
+        const name = @tagName(tag);
+        keys[i] = std.hash.Wyhash.hash(0, name);
+    }
+    filter.populate(comp.gpa, &keys) catch |err| switch (err) {
+        error.KeysLikelyNotUnique => unreachable,
+        else => |e| return e,
+    };
+
+    return Builtins{ ._filter = filter };    
+}
+
 fn atIndex(b: *const Builtins, index: u16) Expanded {
     const item = b._cache.getPtr(index);
     const builtin = BuiltinFunction.fromTag(item.tag);
@@ -294,6 +318,9 @@ pub fn lookup(b: *const Builtins, name: []const u8) Expanded {
 }
 
 pub fn getOrCreate(b: *Builtins, comp: *Compilation, name: []const u8, type_arena: std.mem.Allocator) !?Expanded {
+    const name_hash = std.hash.Wyhash.hash(0, name);
+    if (!b._filter.contain(name_hash)) return null;
+    
     const index = b._name_to_index_map.get(name) orelse blk: {
         @setEvalBranchQuota(10_000);
         const tag = std.meta.stringToEnum(BuiltinFunction.Tag, name) orelse return null;
