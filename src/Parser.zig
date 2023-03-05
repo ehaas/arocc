@@ -7289,7 +7289,6 @@ fn fixedSizeInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tok
         try p.errTok(.int_literal_too_big, tok_i);
         var res: Result = .{ .ty = .{ .specifier = .ulong_long }, .val = Value.int(val) };
         res.node = try p.addNode(.{ .tag = .int_literal, .ty = res.ty, .data = undefined });
-        if (!p.in_macro) try p.value_map.put(res.node, res.val);
         return res;
     }
     if (suffix.isSignedInteger()) {
@@ -7387,7 +7386,6 @@ fn bitInt(p: *Parser, base: u8, buf: []const u8, suffix: NumberSuffix, tok_i: To
         },
     };
     res.node = try p.addNode(.{ .tag = .int_literal, .ty = res.ty, .data = .{ .int = val } });
-    if (!p.in_macro) try p.value_map.put(res.node, res.val);
     return res;
 }
 
@@ -7514,7 +7512,6 @@ fn castInt(p: *Parser, val: u64, specs: []const Type.Specifier) Error!Result {
         res.ty = .{ .specifier = .ulong_long };
     }
     res.node = try p.addNode(.{ .tag = .int_literal, .ty = res.ty, .data = .{ .int = val } });
-    if (!p.in_macro) try p.value_map.put(res.node, res.val);
     return res;
 }
 
