@@ -243,7 +243,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
             try argv.append(try tc.getFilePath("crt0.o"));
         } else if (has_crt_begin_end_files) {
             var path: []const u8 = "";
-            if (tc.getRuntimeLibType() == .compiler_rt and !is_android) {
+            if (tc.getRuntimeLibKind() == .compiler_rt and !is_android) {
                 const crt_begin = try tc.getCompilerRt("crtbegin", .object);
                 if (tc.filesystem.exists(crt_begin)) {
                     path = crt_begin;
@@ -287,7 +287,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
             if (is_static or is_static_pie) {
                 try argv.append("--end-group");
             } else {
-                // Add runtime libs
+                try tc.addRuntimeLibs(argv);
             }
             if (is_iamcu) {
                 try argv.appendSlice(&.{ "--as-needed", "-lsoftfp", "--no-as-needed" });
@@ -297,7 +297,7 @@ pub fn buildLinkerArgs(self: *const Linux, tc: *const Toolchain, argv: *std.Arra
             // TODO: handle CRT begin/end files
             if (has_crt_begin_end_files) {
                 var path: []const u8 = "";
-                if (tc.getRuntimeLibType() == .compiler_rt and !is_android) {
+                if (tc.getRuntimeLibKind() == .compiler_rt and !is_android) {
                     const crt_end = try tc.getCompilerRt("crtend", .object);
                     if (tc.filesystem.exists(crt_end)) {
                         path = crt_end;
