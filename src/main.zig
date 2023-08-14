@@ -30,17 +30,26 @@ pub fn main() !u8 {
         return 1;
     };
 
-    var comp = Compilation.init(gpa);
-    defer comp.deinit();
-
-    comp.environment.loadAll(gpa) catch |er| switch (er) {
+    var env_map = std.process.getEnvMap(gpa) catch |er| switch (er) {
         error.OutOfMemory => {
             std.debug.print("out of memory\n", .{});
             if (fast_exit) std.process.exit(1);
             return 1;
         },
     };
-    defer comp.environment.deinit(gpa);
+    defer env_map.deinit();
+
+    var comp = Compilation.initWithEnvironment(gpa, env_map.hash_map.unmanaged);
+    defer comp.deinit();
+
+    // comp.environment.loadAll(gpa) catch |er| switch (er) {
+    //     error.OutOfMemory => {
+    //         std.debug.print("out of memory\n", .{});
+    //         if (fast_exit) std.process.exit(1);
+    //         return 1;
+    //     },
+    // };
+    // defer comp.environment.deinit(gpa);
 
     comp.addDefaultPragmaHandlers() catch |er| switch (er) {
         error.OutOfMemory => {
