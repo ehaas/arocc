@@ -14,6 +14,7 @@ const Pragma = @import("Pragma.zig");
 const StringInterner = @import("StringInterner.zig");
 const record_layout = @import("record_layout.zig");
 const target_util = @import("target.zig");
+const util = @import("util.zig");
 const BuiltinFunction = @import("builtins/BuiltinFunction.zig");
 
 const Compilation = @This();
@@ -1318,6 +1319,10 @@ pub fn hasBuiltinFunction(comp: *const Compilation, builtin: BuiltinFunction) bo
         .all_ms_languages => return comp.langopts.emulate == .msvc,
         .gnu_lang, .all_gnu_languages => return comp.langopts.standard.isGNU(),
     }
+}
+
+pub fn tmpDir(comp: *const Compilation, erase_on_reboot: bool) []const u8 {
+    return util.system.tmpDir(comp.environment, erase_on_reboot);
 }
 
 pub const renderErrors = Diagnostics.render;

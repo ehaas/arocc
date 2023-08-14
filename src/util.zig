@@ -2,6 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const builtin = @import("builtin");
 const is_windows = builtin.os.tag == .windows;
+pub const system = if (is_windows) @import("system/windows.zig") else @import("system/unix.zig");
 
 pub const Color = enum {
     reset,

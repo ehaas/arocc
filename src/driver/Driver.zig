@@ -606,8 +606,10 @@ fn processSource(
         var random_name: [sub_path_len]u8 = undefined;
         _ = std.fs.base64_encoder.encode(&random_name, &random_bytes);
 
-        const fmt_template = "/tmp/{s}{s}";
+        const tmp_dir = d.comp.tmpDir(true);
+        const fmt_template = "{s}/{s}{s}";
         const fmt_args = .{
+            tmp_dir,
             random_name,
             d.comp.target.ofmt.fileExt(d.comp.target.cpu.arch),
         };
