@@ -16,6 +16,7 @@ const Pragma = @import("Pragma.zig");
 const StrInt = @import("StringInterner.zig");
 const record_layout = @import("record_layout.zig");
 const target_util = @import("target.zig");
+const char_info = @import("char_info.zig");
 
 const Compilation = @This();
 
@@ -126,6 +127,7 @@ types: struct {
 string_interner: StrInt = .{},
 interner: Interner = .{},
 ms_cwd_source_id: ?Source.Id = null,
+unicode_normalizer: ?*char_info.Normalizer = null,
 
 pub fn init(gpa: Allocator) Compilation {
     return .{
@@ -158,6 +160,27 @@ pub fn deinit(comp: *Compilation) void {
     comp.builtins.deinit(comp.gpa);
     comp.string_interner.deinit(comp.gpa);
     comp.interner.deinit(comp.gpa);
+    if (comp.unicode_normalizer) |normalizer| {
+        normalizer.deinit(comp.gpa);
+        comp.gpa.destroy(normalizer);
+        comp.unicode_normalizer = null;
+    }
+}
+
+pub fn getUnicodeNormalizer(comp: *Compilation) !*char_info.Normalizer {
+    return comp.unicode_normalizer orelse {
+        var normalizer = try comp.gpa.create(char_info.Normalizer);
+        errdefer comp.gpa.destroy(normalizer);
+        normalizer.* = char_info.Normalizer.init(comp.gpa) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.Overflow,
+            error.InvalidCharacter,
+            error.StreamTooLong,
+            => |e| return comp.diag.fatalNoSrc("Internal error loading unicode normalization data: {s}", .{@errorName(e)}),
+        };
+        comp.unicode_normalizer = normalizer;
+        return normalizer;
+    };
 }
 
 pub fn getSourceEpoch(self: *const Compilation, max: i64) !?i64 {

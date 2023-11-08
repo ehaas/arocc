@@ -4,8 +4,12 @@
 //! checked separately
 //! isXidStart and isXidContinue are adapted from https://github.com/dtolnay/unicode-ident
 
-const assert = @import("std").debug.assert;
+const std = @import("std");
+const assert = std.debug.assert;
 const tables = @import("char_info/identifier_tables.zig");
+const nfc_quickcheck = @import("char_info/nfc_quickcheck.zig");
+const combiningClass = @import("char_info/derived_combining_class.zig").combiningClass;
+pub const Normalizer = @import("char_info/Normalizer.zig");
 
 /// C11 Standard Annex D
 pub fn isC11IdChar(codepoint: u21) bool {
@@ -504,8 +508,27 @@ pub fn isXidContinue(c: u21) bool {
     return (tables.leaf[offset] >> (@as(u3, @intCast(c % 8)))) & 1 != 0;
 }
 
+/// Implementation of https://unicode.org/reports/tr15/#Detecting_Normalization_Forms
+pub fn isNFCQuickCheck(str: []const u8) bool {
+    var last_canonical_class: u8 = 0;
+    var result: nfc_quickcheck.Kind = .yes;
+    var it = std.unicode.Utf8View.initUnchecked(str).iterator();
+    while (it.nextCodepoint()) |c| {
+        const canonical_class = combiningClass(c);
+        if (last_canonical_class > canonical_class and canonical_class != 0) {
+            return .no;
+        }
+        switch (nfc_quickcheck.classify(c)) {
+            .no => return .no,
+            .maybe => result = .maybe,
+            .yes => {},
+        }
+        last_canonical_class = canonical_class;
+    }
+    return result;
+}
+
 test "isXidStart / isXidContinue panic check" {
-    const std = @import("std");
     for (0x80..0x110000) |i| {
         const c: u21 = @intCast(i);
         if (std.unicode.utf8ValidCodepoint(c)) {
@@ -516,7 +539,6 @@ test "isXidStart / isXidContinue panic check" {
 }
 
 test isXidStart {
-    const std = @import("std");
     try std.testing.expect(!isXidStart('᠑'));
     try std.testing.expect(!isXidStart('™'));
     try std.testing.expect(!isXidStart('£'));
@@ -524,7 +546,6 @@ test isXidStart {
 }
 
 test isXidContinue {
-    const std = @import("std");
     try std.testing.expect(isXidContinue('᠑'));
     try std.testing.expect(!isXidContinue('™'));
     try std.testing.expect(!isXidContinue('£'));

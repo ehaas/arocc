@@ -233,6 +233,21 @@ fn validateExtendedIdentifier(p: *Parser) !bool {
     var invalid_char: u21 = undefined;
     var loc = p.pp.tokens.items(.loc)[p.tok_i];
 
+    // TODO: integrate with NFC quickcheck so we only do this if necessary
+    const normalizer = try p.comp.getUnicodeNormalizer();
+
+    var normalized = normalizer.nfc(p.comp.gpa, slice) catch |er| switch (er) {
+        error.CodepointTooLarge,
+        error.Utf8CannotEncodeSurrogateHalf,
+        => unreachable,
+        else => |e| return e,
+    };
+    defer normalized.deinit();
+    if (!mem.eql(u8, slice, normalized.slice)) {
+        // TODO: issue diagnostic
+        std.debug.print("Non-NFC string detected\n", .{});
+    }
+
     const standard = p.comp.langopts.standard;
     while (it.nextCodepoint()) |codepoint| {
         defer {
