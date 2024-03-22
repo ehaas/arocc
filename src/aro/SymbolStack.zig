@@ -10,6 +10,7 @@ const Type = @import("Type.zig");
 const Parser = @import("Parser.zig");
 const Value = @import("Value.zig");
 const StringId = @import("StringInterner.zig").StringId;
+const hash_map = @import("hash_map.zig");
 
 const SymbolStack = @This();
 
@@ -39,8 +40,8 @@ scopes: std.ArrayListUnmanaged(Scope) = .{},
 active_len: usize = 0,
 
 const Scope = struct {
-    vars: std.AutoHashMapUnmanaged(StringId, Symbol) = .{},
-    tags: std.AutoHashMapUnmanaged(StringId, Symbol) = .{},
+    vars: hash_map.AutoHashMapUnmanaged(StringId, Symbol) = .{},
+    tags: hash_map.AutoHashMapUnmanaged(StringId, Symbol) = .{},
 
     fn deinit(self: *Scope, allocator: Allocator) void {
         self.vars.deinit(allocator);
