@@ -9,6 +9,7 @@ const Tokenizer = @import("Tokenizer.zig");
 const RawToken = Tokenizer.Token;
 const Parser = @import("Parser.zig");
 const Diagnostics = @import("Diagnostics.zig");
+const Treap = @import("Treap.zig");
 const Tree = @import("Tree.zig");
 const Token = Tree.Token;
 const TokenWithExpansionLocs = Tree.TokenWithExpansionLocs;
@@ -108,6 +109,8 @@ preserve_whitespace: bool = false,
 linemarkers: Linemarkers = .none,
 
 hideset: Hideset,
+treap: Treap,
+safe_strings: std.StringHashMapUnmanaged(void) = .{},
 
 pub const parse = Parser.parse;
 
@@ -130,6 +133,7 @@ pub fn init(comp: *Compilation) Preprocessor {
         .poisoned_identifiers = std.StringHashMap(void).init(comp.gpa),
         .top_expansion_buf = ExpandBuf.init(comp.gpa),
         .hideset = .{ .comp = comp },
+        .treap = Treap.init(comp.gpa),
     };
     comp.pragmaEvent(.before_preprocess);
     return pp;
@@ -253,6 +257,8 @@ pub fn deinit(pp: *Preprocessor) void {
     pp.hideset.deinit();
     for (pp.expansion_entries.items(.locs)) |locs| TokenWithExpansionLocs.free(locs, pp.gpa);
     pp.expansion_entries.deinit(pp.gpa);
+    pp.treap.deinit();
+    pp.safe_strings.deinit(pp.gpa);
 }
 
 /// Free buffers that are not needed after preprocessing
@@ -260,7 +266,7 @@ fn clearBuffers(pp: *Preprocessor) void {
     pp.token_buf.clearAndFree();
     pp.char_buf.clearAndFree();
     pp.top_expansion_buf.clearAndFree();
-    pp.hideset.clearAndFree();
+    // pp.hideset.clearAndFree();
 }
 
 pub fn expansionSlice(pp: *Preprocessor, tok: Tree.TokenIndex) []Source.Location {
@@ -736,6 +742,20 @@ fn preprocessExtra(pp: *Preprocessor, source: Source) MacroError!TokenWithExpans
     }
 }
 
+/// Return a string with the same contents as `name` and whose lifetime is the same as the preprocessor's lifetime
+/// If `tok` is not from the generated source, this is just `name`.
+/// If `tok` is from the generated source, pointers are invalidated when the underlying ArrayList is resized. Therefore,
+/// duplicate the string and store it (so we aren't repeatedly copying the same string)
+fn getSafeString(pp: *Preprocessor, tok: TokenWithExpansionLocs, name: []const u8) ![]const u8 {
+    if (tok.loc.id != .generated) return name;
+    const gop = try pp.safe_strings.getOrPut(pp.gpa, name);
+    if (!gop.found_existing) {
+        const copy = try pp.arena.allocator().dupe(u8, name);
+        gop.key_ptr.* = copy;
+    }
+    return gop.key_ptr.*;
+}
+
 /// Get raw token source string.
 /// Returned slice is invalidated when comp.generated_buf is updated.
 pub fn tokSlice(pp: *Preprocessor, token: anytype) []const u8 {
@@ -872,7 +892,7 @@ fn expr(pp: *Preprocessor, tokenizer: *Tokenizer) MacroError!bool {
     } else unreachable;
     if (pp.top_expansion_buf.items.len != 0) {
         pp.expansion_source_loc = pp.top_expansion_buf.items[0].loc;
-        pp.hideset.clearRetainingCapacity();
+        // pp.hideset.clearRetainingCapacity();
         try pp.expandMacroExhaustive(tokenizer, &pp.top_expansion_buf, 0, pp.top_expansion_buf.items.len, false, .expr);
     }
     for (pp.top_expansion_buf.items) |tok| {
@@ -1566,7 +1586,7 @@ fn expandFuncMacro(
     func_macro: *const Macro,
     args: *const MacroArguments,
     expanded_args: *const MacroArguments,
-    hideset_arg: Hideset.Index,
+    hideset_arg: Treap.Node,
 ) MacroError!ExpandBuf {
     var hideset = hideset_arg;
     var buf = ExpandBuf.init(pp.gpa);
@@ -1967,7 +1987,7 @@ fn expandFuncMacro(
         const tok_hidelist = pp.hideset.get(tok.loc);
         switch (tok.id) {
             .identifier, .extended_identifier, .r_paren => {
-                const new_hidelist = try pp.hideset.@"union"(tok_hidelist, hideset);
+                const new_hidelist = try pp.treap.@"union"(tok_hidelist, hideset);
                 try pp.hideset.put(tok.loc, new_hidelist);
             },
             else => {},
@@ -2219,7 +2239,7 @@ fn expandMacroExhaustive(
                 continue;
             };
             const macro_hidelist = pp.hideset.get(macro_tok.loc);
-            if (pp.hideset.contains(macro_hidelist, expanded)) {
+            if (pp.treap.contains(macro_hidelist, expanded)) {
                 idx += 1;
                 continue;
             }
@@ -2260,8 +2280,9 @@ fn expandMacroExhaustive(
                         args.deinit();
                     }
                     const r_paren_hidelist = pp.hideset.get(r_paren.loc);
-                    var hs = try pp.hideset.intersection(macro_hidelist, r_paren_hidelist);
-                    hs = try pp.hideset.prepend(macro_tok.loc, hs);
+                    var hs = try pp.treap.intersection(macro_hidelist, r_paren_hidelist);
+                    const safe = try pp.getSafeString(macro_tok, expanded);
+                    hs = try pp.treap.addNodeTo(hs, safe);
 
                     var args_count: u32 = @intCast(args.items.len);
                     // if the macro has zero arguments g() args_count is still 1
@@ -2329,7 +2350,8 @@ fn expandMacroExhaustive(
                     const res = try pp.expandObjMacro(macro);
                     defer res.deinit();
 
-                    const hs = try pp.hideset.prepend(macro_tok.loc, macro_hidelist);
+                    const safe = try pp.getSafeString(macro_tok, expanded);
+                    const hs = try pp.treap.addNodeTo(macro_hidelist, safe);
 
                     const macro_expansion_locs = macro_tok.expansionSlice();
                     var increment_idx_by = res.items.len;
@@ -2341,7 +2363,7 @@ fn expandMacroExhaustive(
                         switch (tok.id) {
                             .identifier, .extended_identifier, .r_paren => {
                                 const tok_hidelist = pp.hideset.get(tok.loc);
-                                const new_hidelist = try pp.hideset.@"union"(tok_hidelist, hs);
+                                const new_hidelist = try pp.treap.@"union"(tok_hidelist, hs);
                                 try pp.hideset.put(tok.loc, new_hidelist);
                             },
                             else => {},
