@@ -1965,8 +1965,13 @@ fn expandFuncMacro(
         try tok.addExpansionLocation(pp.gpa, &.{macro_tok.loc});
         try tok.addExpansionLocation(pp.gpa, macro_expansion_locs);
         const tok_hidelist = pp.hideset.get(tok.loc);
-        const new_hidelist = try pp.hideset.@"union"(tok_hidelist, hideset);
-        try pp.hideset.put(tok.loc, new_hidelist);
+        switch (tok.id) {
+            .identifier, .extended_identifier, .r_paren => {
+                const new_hidelist = try pp.hideset.@"union"(tok_hidelist, hideset);
+                try pp.hideset.put(tok.loc, new_hidelist);
+            },
+            else => {},
+        }
     }
 
     return buf;
@@ -2333,9 +2338,14 @@ fn expandMacroExhaustive(
                         try tok.addExpansionLocation(pp.gpa, &.{macro_tok.loc});
                         try tok.addExpansionLocation(pp.gpa, macro_expansion_locs);
 
-                        const tok_hidelist = pp.hideset.get(tok.loc);
-                        const new_hidelist = try pp.hideset.@"union"(tok_hidelist, hs);
-                        try pp.hideset.put(tok.loc, new_hidelist);
+                        switch (tok.id) {
+                            .identifier, .extended_identifier, .r_paren => {
+                                const tok_hidelist = pp.hideset.get(tok.loc);
+                                const new_hidelist = try pp.hideset.@"union"(tok_hidelist, hs);
+                                try pp.hideset.put(tok.loc, new_hidelist);
+                            },
+                            else => {},
+                        }
 
                         if (tok.id == .keyword_defined and eval_ctx == .expr) {
                             try pp.comp.addDiagnostic(.{
