@@ -8,6 +8,8 @@ const Token = Tree.Token;
 const NodeIndex = Tree.NodeIndex;
 const AllocatorError = std.mem.Allocator.Error;
 
+const assembly_backend = @import("assembly_backend");
+
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 
 const AddCommandLineArgsResult = struct {
@@ -19,6 +21,7 @@ const AddCommandLineArgsResult = struct {
 
 /// Returns only_preprocess and line_markers settings if saw -E
 fn addCommandLineArgs(comp: *aro.Compilation, file: aro.Source, macro_buf: anytype) !AddCommandLineArgsResult {
+    _ = assembly_backend;
     var only_preprocess = false;
     var line_markers: aro.Preprocessor.Linemarkers = .none;
     var system_defines: aro.Compilation.SystemDefinesMode = .include_system_defines;
@@ -440,17 +443,27 @@ pub fn main() !void {
             std.debug.assert((try std.zig.string_literal.parseWrite(buf.writer(), pp.tokSlice(macro.tokens[0]))) == .success);
             const expected_output = buf.items;
 
-            const obj_name = "test_object.o";
-            if (true) break :blk;
-            // {
-            //     const obj = try Codegen.generateTree(&comp, tree);
-            //     defer obj.deinit();
+            const obj_name = if (pp.comp.code_gen_options.optimization_level == .@"0") name: {
+                const obj_name = "test_asm.s";
+                const assembly = try assembly_backend.genAsm(comp.target, tree);
+                defer assembly.deinit(comp.gpa);
 
-            //     const out_file = try std.fs.cwd().createFile(obj_name, .{});
-            //     defer out_file.close();
+                const out_file = try comp.cwd.createFile(obj_name, .{});
+                defer out_file.close();
 
-            //     try obj.finish(out_file);
-            // }
+                try assembly.writeToFile(out_file);
+
+                break :name obj_name;
+            } else name: {
+                // const obj = try Codegen.generateTree(&comp, tree);
+                // defer obj.deinit();
+
+                // const out_file = try std.fs.cwd().createFile(obj_name, .{});
+                // defer out_file.close();
+
+                // try obj.finish(out_file);
+                break :name "test_obj.o";
+            };
 
             var child = std.process.Child.init(&.{ args[2], "run", "-lc", obj_name }, gpa);
             child.stdout_behavior = .Pipe;

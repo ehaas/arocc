@@ -234,6 +234,8 @@ pub fn build(b: *Build) !void {
             .use_lld = use_llvm,
         });
         integration_tests.root_module.addImport("aro", aro_module);
+        integration_tests.root_module.addImport("assembly_backend", assembly_backend);
+
         const test_runner_options = b.addOptions();
         integration_tests.root_module.addOptions("build_options", test_runner_options);
         test_runner_options.addOption(bool, "test_all_allocation_failures", test_all_allocation_failures);
